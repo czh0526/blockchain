@@ -22,7 +22,7 @@ import (
 const (
 	sskLen = 16 // shared key length
 	sigLen = 65 // elliptic S256
-	pubLen = 64
+	pubLen = 64 // 512 bit pubkey in uncompressed representation without format byte
 	shaLen = 32 // hash length
 
 	authMsgLen  = sigLen + shaLen + pubLen + shaLen + 1
@@ -58,6 +58,36 @@ type encHandshake struct {
 	remoteRandomPub      *ecies.PublicKey
 }
 
+func (h *encHandshake) handleAuthResp(msg *authRespV4) (err error) {
+	h.respNonce = msg.Nonce[:]
+	h.remoteRandomPub, err = importPublicKey(msg.RandomPubkey[:])
+	return err
+}
+
+// 签名公钥 => 加密公钥
+func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
+	var pubKey65 []byte
+	switch len(pubKey) {
+	case 64:
+		pubKey65 = append([]byte{0x04}, pubKey...)
+	case 65:
+		pubKey65 = pubKey 
+	default:
+		return nil, fmt.Errorf("invalid public key length %v(expect 64/65)", len(pubKey))
+	}
+
+	// []byte => ecdsa.PublicKey
+	pub := crypto.ToECDSAPub(pubKey65)
+	if pub.X == nil {
+		return nil, fmt.Errorf("invalid public key")
+	}
+
+	// ecdsa.PublicKey => ecies.PublicKey
+	return ecies.ImportECDSAPublic(pub), nil
+}
+
+
+
 type authMsgV4 struct {
 	gotPlain        bool
 	Signature       [sigLen]byte
@@ -71,6 +101,27 @@ type authRespV4 struct {
 	Nonce        [shaLen]byte
 	Version      uint
 	Rest         []rlp.RawValue `rlp:"tail"`
+}
+
+func (msg *authMsgV4) decodePlain(input []byte) {
+	// 提取signature
+	n := copy(msg.Signature[:], input)
+	// 跳过一个shaLenß
+	n += shaLen
+	// 提取public key
+	n += copy(msg.InitiatorPubkey[:], input[n:])
+	// 提取nonce
+	copy(msg.Nonce[:], input[n:])
+	msg.Version = 4
+	msg.gotPlain = true
+}
+
+func (msg *authRespV4) decodePlain(input []byte) {
+	// 提取public key
+	n := copy(msg.RandomPubkey[:], input)
+	// 提取nonce
+	copy(msg.Nonce[:], input[n:])
+	msg.Version = 4
 }
 
 func (h *encHandshake) makeAuthMsg(prv *ecdsa.PrivateKey, token []byte) (*authMsgV4, error) {
@@ -170,12 +221,18 @@ func initiatorEncHandshake(conn io.ReadWriter, prv *ecdsa.PrivateKey, remoteID d
 		return s, err
 	}
 
-	// 读取 authResp
+	// 读取 authRespMsg
 	authRespMsg := new(authRespV4)
 	authRespPacket, err := readHandshakeMsg(authRespMsg, encAuthRespLen, prv, conn)
 	if err != nil {
 		return s, err
 	}
+
+	if err := h.handleAuthResp(authRespMsg); err != nil {
+		return s, err 
+	}
+
+	return h.secrets(authPacket, authRespPacket)
 }
 
 func xor(one, other []byte) (xor []byte) {
@@ -221,7 +278,7 @@ func readHandshakeMsg(msg plainDecoder, plainSize int, prv *ecdsa.PrivateKey, r 
 	// 获取本地节点的加密私钥
 	key := ecies.ImportECDSA(prv)
 	// 解密私钥
-	if dec, err := key.Decrypt(rand.Reader, buf, nil, nil); err == nil {
+	if dec, err := key.Decrypt(buf, nil, nil); err == nil {
 		msg.decodePlain(dec)
 		return buf, nil
 	}
@@ -239,7 +296,7 @@ func readHandshakeMsg(msg plainDecoder, plainSize int, prv *ecdsa.PrivateKey, r 
 		return buf, err
 	}
 	// 解密消息
-	dec, err := key.Decrypt(rand.Reader, buf[2:], nil, prefix)
+	dec, err := key.Decrypt(buf[2:], nil, prefix)
 	if err != nil {
 		return buf, err
 	}
