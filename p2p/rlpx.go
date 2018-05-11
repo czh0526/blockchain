@@ -3,6 +3,7 @@ package p2p
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -146,6 +147,20 @@ func (h *encHandshake) makeAuthMsg(prv *ecdsa.PrivateKey, token []byte) (*authMs
 	return msg, nil
 }
 
+func (h *encHandshake) makeAuthResp() (msg *authRespV4, err error) {
+	// 生成 respNonce
+	h.respNonce = make([]byte, shaLen)
+	if _, err = rand.Read(h.respNonce); err != nil {
+		return nil, err
+	}
+
+	msg = new(authRespV4)
+	copy(msg.Nonce[:], h.respNonce)
+	copy(msg.RandomPubkey[:], exportPubkey(&h.randomPrivKey.PublicKey))
+	msg.Version = 4
+	return msg, nil
+}
+
 func (h *encHandshake) staticSharedSecret(prv *ecdsa.PrivateKey) ([]byte, error) {
 	return ecies.ImportECDSA(prv).GenerateShared(h.remotePub, sskLen, sskLen)
 }
@@ -201,6 +216,14 @@ func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
 
 	// ecdsa.PublicKey => ecies.PublicKey
 	return ecies.ImportECDSAPublic(pub), nil
+}
+
+func exportPubkey(pub *ecies.PublicKey) []byte {
+	if pub == nil {
+		panic("nil pubkey")
+	}
+
+	return elliptic.Marshal(pub.Curve, pub.X, pub.Y)[1:]
 }
 
 type authMsgV4 struct {
@@ -304,21 +327,42 @@ func initiatorEncHandshake(conn io.ReadWriter, prv *ecdsa.PrivateKey, remoteID d
 }
 
 func receiverEncHandshake(conn io.ReadWriter, prv *ecdsa.PrivateKey, token []byte) (s secrets, err error) {
+	// 读取 authMsgV4
 	authMsg := new(authMsgV4)
 	authPacket, err := readHandshakeMsg(authMsg, encAuthMsgLen, prv, conn)
 	if err != nil {
 		return s, err
 	}
 
+	// 构建本地的encHandshake对象
 	h := new(encHandshake)
 	if err := h.handleAuthMsg(authMsg, prv); err != nil {
 		return s, err
 	}
 
+	// 生成 authRespV4
 	authRespMsg, err := h.makeAuthResp()
 	if err != nil {
 		return s, err
 	}
+
+	// authRespV4 => packet([]byte)
+	var authRespPacket []byte
+	if authMsg.gotPlain {
+		authRespPacket, err = authRespMsg.sealPlain(h)
+	} else {
+		authRespPacket, err = sealEIP8(authRespMsg, h)
+	}
+	if err != nil {
+		return s, err
+	}
+
+	if _, err = conn.Write(authRespPacket); err != nil {
+		return s, err
+	}
+
+	return h.secrets(authPacket, authRespPacket)
+
 }
 
 func xor(one, other []byte) (xor []byte) {
