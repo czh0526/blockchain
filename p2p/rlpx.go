@@ -15,6 +15,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/ecies"
+	"github.com/ethereum/go-ethereum/crypto/secp256k1"
+	"github.com/ethereum/go-ethereum/crypto/sha3"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/rlp"
 )
@@ -58,70 +60,47 @@ type encHandshake struct {
 	remoteRandomPub      *ecies.PublicKey
 }
 
+// 由接收方调用
+func (h *encHandshake) handleAuthMsg(msg *authMsgV4, prv *ecdsa.PrivateKey) error {
+	// 发起方的Nonce
+	h.initNonce = msg.Nonce[:]
+	// 发起方的ID
+	h.remoteID = msg.InitiatorPubkey
+	rpub, err := h.remoteID.Pubkey()
+	if err != nil {
+		return fmt.Errorf("bad remoteID: %#v", err)
+	}
+	// 发起方的加密公钥
+	h.remotePub = ecies.ImportECDSAPublic(rpub)
+
+	// 产生随机密钥
+	if h.randomPrivKey == nil {
+		h.randomPrivKey, err = ecies.GenerateKey(rand.Reader, crypto.S256(), nil)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 生成共享密钥
+	token, err := h.staticSharedSecret(prv)
+	if err != nil {
+		return err
+	}
+	signedMsg := xor(token, h.initNonce)
+
+	// 根据 signedMsg + msg => remote random pub
+	remoteRandomPub, err := secp256k1.RecoverPubkey(signedMsg, msg.Signature[:])
+	if err != nil {
+		return err
+	}
+	h.remoteRandomPub, _ = importPublicKey(remoteRandomPub)
+	return nil
+}
+
 func (h *encHandshake) handleAuthResp(msg *authRespV4) (err error) {
 	h.respNonce = msg.Nonce[:]
 	h.remoteRandomPub, err = importPublicKey(msg.RandomPubkey[:])
 	return err
-}
-
-// 签名公钥 => 加密公钥
-func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
-	var pubKey65 []byte
-	switch len(pubKey) {
-	case 64:
-		pubKey65 = append([]byte{0x04}, pubKey...)
-	case 65:
-		pubKey65 = pubKey 
-	default:
-		return nil, fmt.Errorf("invalid public key length %v(expect 64/65)", len(pubKey))
-	}
-
-	// []byte => ecdsa.PublicKey
-	pub := crypto.ToECDSAPub(pubKey65)
-	if pub.X == nil {
-		return nil, fmt.Errorf("invalid public key")
-	}
-
-	// ecdsa.PublicKey => ecies.PublicKey
-	return ecies.ImportECDSAPublic(pub), nil
-}
-
-
-
-type authMsgV4 struct {
-	gotPlain        bool
-	Signature       [sigLen]byte
-	InitiatorPubkey [pubLen]byte
-	Nonce           [shaLen]byte
-	Version         uint
-}
-
-type authRespV4 struct {
-	RandomPubkey [pubLen]byte
-	Nonce        [shaLen]byte
-	Version      uint
-	Rest         []rlp.RawValue `rlp:"tail"`
-}
-
-func (msg *authMsgV4) decodePlain(input []byte) {
-	// 提取signature
-	n := copy(msg.Signature[:], input)
-	// 跳过一个shaLenß
-	n += shaLen
-	// 提取public key
-	n += copy(msg.InitiatorPubkey[:], input[n:])
-	// 提取nonce
-	copy(msg.Nonce[:], input[n:])
-	msg.Version = 4
-	msg.gotPlain = true
-}
-
-func (msg *authRespV4) decodePlain(input []byte) {
-	// 提取public key
-	n := copy(msg.RandomPubkey[:], input)
-	// 提取nonce
-	copy(msg.Nonce[:], input[n:])
-	msg.Version = 4
 }
 
 func (h *encHandshake) makeAuthMsg(prv *ecdsa.PrivateKey, token []byte) (*authMsgV4, error) {
@@ -169,6 +148,95 @@ func (h *encHandshake) makeAuthMsg(prv *ecdsa.PrivateKey, token []byte) (*authMs
 
 func (h *encHandshake) staticSharedSecret(prv *ecdsa.PrivateKey) ([]byte, error) {
 	return ecies.ImportECDSA(prv).GenerateShared(h.remotePub, sskLen, sskLen)
+}
+
+func (h *encHandshake) secrets(auth, authResp []byte) (secrets, error) {
+	// 生成需要交换的共享密钥
+	ecdheSecret, err := h.randomPrivKey.GenerateShared(h.remoteRandomPub, sskLen, sskLen)
+	if err != nil {
+		return secrets{}, err
+	}
+
+	sharedSecret := crypto.Keccak256(ecdheSecret, crypto.Keccak256(h.respNonce, h.initNonce))
+	aesSecret := crypto.Keccak256(ecdheSecret, sharedSecret)
+	s := secrets{
+		RemoteID: h.remoteID,
+		AES:      aesSecret,
+		MAC:      crypto.Keccak256(ecdheSecret, aesSecret),
+	}
+
+	// 生成 Hash
+	mac1 := sha3.NewKeccak256()
+	mac1.Write(xor(s.MAC, h.respNonce))
+	mac1.Write(auth)
+	mac2 := sha3.NewKeccak256()
+	mac2.Write(xor(s.MAC, h.initNonce))
+	mac2.Write(authResp)
+	if h.initiator {
+		s.EgressMAC, s.IngressMAC = mac1, mac2
+	} else {
+		s.EgressMAC, s.IngressMAC = mac2, mac1
+	}
+
+	return s, nil
+}
+
+// 签名公钥 => 加密公钥
+func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
+	var pubKey65 []byte
+	switch len(pubKey) {
+	case 64:
+		pubKey65 = append([]byte{0x04}, pubKey...)
+	case 65:
+		pubKey65 = pubKey
+	default:
+		return nil, fmt.Errorf("invalid public key length %v(expect 64/65)", len(pubKey))
+	}
+
+	// []byte => ecdsa.PublicKey
+	pub := crypto.ToECDSAPub(pubKey65)
+	if pub.X == nil {
+		return nil, fmt.Errorf("invalid public key")
+	}
+
+	// ecdsa.PublicKey => ecies.PublicKey
+	return ecies.ImportECDSAPublic(pub), nil
+}
+
+type authMsgV4 struct {
+	gotPlain        bool
+	Signature       [sigLen]byte
+	InitiatorPubkey [pubLen]byte
+	Nonce           [shaLen]byte
+	Version         uint
+}
+
+type authRespV4 struct {
+	RandomPubkey [pubLen]byte
+	Nonce        [shaLen]byte
+	Version      uint
+	Rest         []rlp.RawValue `rlp:"tail"`
+}
+
+func (msg *authMsgV4) decodePlain(input []byte) {
+	// 提取signature
+	n := copy(msg.Signature[:], input)
+	// 跳过一个shaLenß
+	n += shaLen
+	// 提取public key
+	n += copy(msg.InitiatorPubkey[:], input[n:])
+	// 提取nonce
+	copy(msg.Nonce[:], input[n:])
+	msg.Version = 4
+	msg.gotPlain = true
+}
+
+func (msg *authRespV4) decodePlain(input []byte) {
+	// 提取public key
+	n := copy(msg.RandomPubkey[:], input)
+	// 提取nonce
+	copy(msg.Nonce[:], input[n:])
+	msg.Version = 4
 }
 
 func (t *rlpx) doEncHandshake(prv *ecdsa.PrivateKey, dial *discover.Node) (discover.NodeID, error) {
@@ -229,10 +297,28 @@ func initiatorEncHandshake(conn io.ReadWriter, prv *ecdsa.PrivateKey, remoteID d
 	}
 
 	if err := h.handleAuthResp(authRespMsg); err != nil {
-		return s, err 
+		return s, err
 	}
 
 	return h.secrets(authPacket, authRespPacket)
+}
+
+func receiverEncHandshake(conn io.ReadWriter, prv *ecdsa.PrivateKey, token []byte) (s secrets, err error) {
+	authMsg := new(authMsgV4)
+	authPacket, err := readHandshakeMsg(authMsg, encAuthMsgLen, prv, conn)
+	if err != nil {
+		return s, err
+	}
+
+	h := new(encHandshake)
+	if err := h.handleAuthMsg(authMsg, prv); err != nil {
+		return s, err
+	}
+
+	authRespMsg, err := h.makeAuthResp()
+	if err != nil {
+		return s, err
+	}
 }
 
 func xor(one, other []byte) (xor []byte) {
