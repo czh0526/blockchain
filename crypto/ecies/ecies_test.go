@@ -29,7 +29,7 @@ func TestEncryptDecrypt(t *testing.T) {
 		t.FailNow()
 	}
 
-	pt, err := prv2.Decrypt(rand.Reader, ct, nil, nil)
+	pt, err := prv2.Decrypt(ct, nil, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 		t.FailNow()
@@ -40,7 +40,7 @@ func TestEncryptDecrypt(t *testing.T) {
 		t.FailNow()
 	}
 
-	_, err = prv1.Decrypt(rand.Reader, ct, nil, nil)
+	_, err = prv1.Decrypt(ct, nil, nil)
 	if err == nil {
 		fmt.Println("ecies: encryption should not have succeeded")
 		t.FailNow()
