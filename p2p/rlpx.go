@@ -2,13 +2,18 @@ package p2p
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
+	"io/ioutil"
 	mrand "math/rand"
 	"net"
 	"sync"
@@ -20,9 +25,12 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/sha3"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/golang/snappy"
 )
 
 const (
+	maxUint24 = ^uint32(0) >> 8
+
 	sskLen = 16 // shared key length
 	sigLen = 65 // elliptic S256
 	pubLen = 64 // 512 bit pubkey in uncompressed representation without format byte
@@ -37,11 +45,168 @@ const (
 	encAuthRespLen = authRespLen + eciesOverhead
 
 	handshakeTimeout = 5 * time.Second
+	discWriteTimeout = 1 * time.Second
+)
+
+// 16MB: 24位2进制整数的最大值.
+var errPlainMessageTooLarge = errors.New("message length >= 16MB")
+
+var (
+	zeroHeader = []byte{0xC2, 0x80, 0x80}
+	zero16     = make([]byte, 16)
 )
 
 type rlpx struct {
 	fd       net.Conn
 	rmu, wmu sync.Mutex
+	rw       *rlpxFrameRW
+}
+
+type rlpxFrameRW struct {
+	conn io.ReadWriter
+	enc  cipher.Stream
+	dec  cipher.Stream
+
+	macCipher  cipher.Block
+	egressMAC  hash.Hash
+	ingressMAC hash.Hash
+
+	snappy bool
+}
+
+func (rw *rlpxFrameRW) WriteMsg(msg Msg) error {
+	ptype, _ := rlp.EncodeToBytes(msg.Code)
+	if rw.snappy {
+		if msg.Size > maxUint24 {
+			return errPlainMessageTooLarge
+		}
+		// 读取 payload
+		payload, _ := ioutil.ReadAll(msg.Payload)
+		// 压缩 payload
+		payload = snappy.Encode(nil, payload)
+
+		// 重新构建 payload
+		msg.Payload = bytes.NewReader(payload)
+		msg.Size = uint32(len(payload))
+
+	}
+
+	// 构建32字节的头
+	headbuf := make([]byte, 32)
+	fsize := uint32(len(ptype)) + msg.Size
+	if fsize > maxUint24 {
+		return errors.New("message size overflows uint24")
+	}
+	// 写入尺寸
+	putInt24(fsize, headbuf)
+	copy(headbuf[3:], zeroHeader)
+	// 加密前16字节
+	rw.enc.XORKeyStream(headbuf[:16], headbuf[:16])
+	// 将消息认证码写入后16字节
+	copy(headbuf[16:], updateMAC(rw.egressMAC, rw.macCipher, headbuf[:16]))
+
+	// ==================================================================
+
+	// 1) 发送 headbuf
+	if _, err := rw.conn.Write(headbuf); err != nil {
+		return err
+	}
+
+	// 2) 发送 msg, 同步计算发送数据的hash(rw.egressMAC完成)
+	tee := cipher.StreamWriter{S: rw.enc, W: io.MultiWriter(rw.conn, rw.egressMAC)}
+	// 2.1) 发送 ptype
+	if _, err := tee.Write(ptype); err != nil {
+		return err
+	}
+
+	// 2.2) 发送 payload
+	if _, err := io.Copy(tee, msg.Payload); err != nil {
+		return err
+	}
+
+	// 2.3) 发送 padding
+	if padding := fsize % 16; padding > 0 {
+		if _, err := tee.Write(zero16[:16-padding]); err != nil {
+			return err
+		}
+	}
+
+	// 3) 发送frame的消息认证码(MAC)
+	fmcseed := rw.egressMAC.Sum(nil)                      // 取得发送数据的hash值
+	mac := updateMAC(rw.egressMAC, rw.macCipher, fmcseed) // 计算frame的消息认证码
+	_, err := rw.conn.Write(mac)
+	return err
+}
+
+func (rw *rlpxFrameRW) ReadMsg() (msg Msg, err error) {
+	// 1) 读取 headbuf
+	headbuf := make([]byte, 32)
+	if _, err := io.ReadFull(rw.conn, headbuf); err != nil {
+		return msg, err
+	}
+
+	// 校验 headbuf
+	shouldMAC := updateMAC(rw.ingressMAC, rw.macCipher, headbuf[:16])
+	if !hmac.Equal(shouldMAC, headbuf[16:]) {
+		return msg, errors.New("bad header MAC")
+	}
+
+	// 2) 读取frame的尺寸
+	rw.dec.XORKeyStream(headbuf[:16], headbuf[:16])
+	fsize := readInt24(headbuf)
+	var rsize = fsize
+	if padding := fsize % 16; padding > 0 {
+		rsize += 16 - padding
+	}
+
+	// 3) 读取frame
+	framebuf := make([]byte, rsize)
+	if _, err := io.ReadFull(rw.conn, framebuf); err != nil {
+		return msg, err
+	}
+
+	// 计算frame的消息认证码，并校验(重用了headbuf[:16])
+	rw.ingressMAC.Write(framebuf)
+	fmacseed := rw.ingressMAC.Sum(nil)
+	if _, err := io.ReadFull(rw.conn, headbuf[:16]); err != nil {
+		return msg, err
+	}
+
+	shouldMAC = updateMAC(rw.ingressMAC, rw.macCipher, fmacseed)
+	if !hmac.Equal(shouldMAC, headbuf[:16]) {
+		return msg, errors.New("bad frame MAC")
+	}
+	rw.dec.XORKeyStream(framebuf, framebuf)
+
+	// 解密msg的内容
+	content := bytes.NewReader(framebuf[:fsize])
+	if err := rlp.Decode(content, &msg.Code); err != nil {
+		return msg, err
+	}
+	msg.Size = uint32(content.Len())
+	msg.Payload = content
+
+	// 解压缩
+	if rw.snappy {
+		payload, err := ioutil.ReadAll(msg.Payload)
+		if err != nil {
+			return msg, err
+		}
+		size, err := snappy.DecodedLen(payload)
+		if err != nil {
+			return msg, err
+		}
+		if size > int(maxUint24) {
+			return msg, errPlainMessageTooLarge
+		}
+		payload, err = snappy.Decode(nil, payload)
+		if err != nil {
+			return msg, err
+		}
+		msg.Size, msg.Payload = uint32(size), bytes.NewReader(payload)
+	}
+
+	return msg, nil
 }
 
 type secrets struct {
@@ -171,6 +336,7 @@ func (h *encHandshake) secrets(auth, authResp []byte) (secrets, error) {
 	if err != nil {
 		return secrets{}, err
 	}
+	fmt.Printf("h.initiator = %v, ecdhtSecret = 0x%x \n", h.initiator, ecdheSecret)
 
 	sharedSecret := crypto.Keccak256(ecdheSecret, crypto.Keccak256(h.respNonce, h.initNonce))
 	aesSecret := crypto.Keccak256(ecdheSecret, sharedSecret)
@@ -196,7 +362,30 @@ func (h *encHandshake) secrets(auth, authResp []byte) (secrets, error) {
 	return s, nil
 }
 
-// 签名公钥 => 加密公钥
+func newRLPXFrameRW(conn io.ReadWriter, s secrets) *rlpxFrameRW {
+	// 生成消息认证码
+	macc, err := aes.NewCipher(s.MAC)
+	if err != nil {
+		panic("invalid MAC secret: " + err.Error())
+	}
+	// 加密 Block
+	encc, err := aes.NewCipher(s.AES)
+	if err != nil {
+		panic("invalud AESsecret: " + err.Error())
+	}
+
+	iv := make([]byte, encc.BlockSize())
+	return &rlpxFrameRW{
+		conn:       conn,
+		enc:        cipher.NewCTR(encc, iv), // 加密运算器
+		dec:        cipher.NewCTR(encc, iv), // 解密运算器
+		macCipher:  macc,                    // 消息认证码
+		egressMAC:  s.EgressMAC,
+		ingressMAC: s.IngressMAC,
+	}
+}
+
+// 签名公钥([]byte) => 加密公钥
 func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
 	var pubKey65 []byte
 	switch len(pubKey) {
@@ -218,6 +407,7 @@ func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
 	return ecies.ImportECDSAPublic(pub), nil
 }
 
+// 加密公钥 => 签名公钥([]byte)
 func exportPubkey(pub *ecies.PublicKey) []byte {
 	if pub == nil {
 		panic("nil pubkey")
@@ -268,6 +458,7 @@ func (t *rlpx) doEncHandshake(prv *ecdsa.PrivateKey, dial *discover.Node) (disco
 		err error
 	)
 
+	// 使用发起者/接收者模式进行密钥交换
 	if dial == nil {
 		sec, err = receiverEncHandshake(t.fd, prv, nil)
 	} else {
@@ -277,12 +468,54 @@ func (t *rlpx) doEncHandshake(prv *ecdsa.PrivateKey, dial *discover.Node) (disco
 		return discover.NodeID{}, err
 	}
 
+	// 构建读写通道
+	t.wmu.Lock()
+	t.rw = newRLPXFrameRW(t.fd, sec)
+	t.wmu.Unlock()
 	return sec.RemoteID, nil
+}
+
+func (t *rlpx) doProtoHandshake(our *protoHandshake) (their *protoHandshake, err error) {
+	// 发送握手消息
+	werr := make(chan error, 1)
+	go func() { werr <- Send(t.rw, handshakeMsg, our) }()
+
+	// 读取远端的握手消息
+	if their, err = readProtocolHandshake(t.rw, our); err != nil {
+		<-werr
+		return nil, err
+	}
+	if err := <-werr; err != nil {
+		return nil, fmt.Errorf("write error: %v", err)
+	}
+	t.rw.snappy = their.Version >= snappyProtocolVersion
+	return their, nil
+}
+
+func (t *rlpx) ReadMsg() (Msg, error) {
+	t.rmu.Lock()
+	defer t.rmu.Unlock()
+	t.fd.SetReadDeadline(time.Now().Add(frameReadTimeout))
+	return t.rw.ReadMsg()
+}
+
+func (t *rlpx) WriteMsg(msg Msg) error {
+	t.wmu.Lock()
+	defer t.wmu.Unlock()
+	t.fd.SetWriteDeadline(time.Now().Add(frameWriteTimeout))
+	return t.rw.WriteMsg(msg)
 }
 
 func (t *rlpx) close(err error) {
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
+	if t.rw != nil {
+		if r, ok := err.(DiscReason); ok && r != DiscNetworkError {
+			if err := t.fd.SetWriteDeadline(time.Now().Add(discWriteTimeout)); err == nil {
+				SendItems(t.rw, discMsg, r)
+			}
+		}
+	}
 
 	t.fd.Close()
 }
@@ -387,11 +620,18 @@ func sealEIP8(msg interface{}, h *encHandshake) ([]byte, error) {
 	buf.Write(pad)
 	// prefix
 	prefix := make([]byte, 2)
-	binary.BigEndian.PutUint64(prefix, uint64(buf.Len()+eciesOverhead))
+	binary.BigEndian.PutUint16(prefix, uint16(buf.Len()+eciesOverhead))
 
 	// 加密
 	enc, err := ecies.Encrypt(rand.Reader, h.remotePub, buf.Bytes(), nil, prefix)
 	return append(prefix, enc...), err
+}
+
+func (msg *authRespV4) sealPlain(hs *encHandshake) ([]byte, error) {
+	buf := make([]byte, authRespLen)
+	n := copy(buf, msg.RandomPubkey[:])
+	copy(buf[n:], msg.Nonce[:])
+	return ecies.Encrypt(rand.Reader, hs.remotePub, buf, nil, nil)
 }
 
 type plainDecoder interface {
@@ -434,4 +674,54 @@ func readHandshakeMsg(msg plainDecoder, plainSize int, prv *ecdsa.PrivateKey, r 
 	// 解码消息
 	s := rlp.NewStream(bytes.NewReader(dec), 0)
 	return buf, s.Decode(msg)
+}
+
+func readProtocolHandshake(rw MsgReader, our *protoHandshake) (*protoHandshake, error) {
+	msg, err := rw.ReadMsg()
+	if err != nil {
+		return nil, err
+	}
+
+	if msg.Size > baseProtocolMaxMsgSize {
+		return nil, fmt.Errorf("message too big")
+	}
+	if msg.Code == discMsg {
+		var reason [1]DiscReason
+		rlp.Decode(msg.Payload, &reason)
+		return nil, reason[0]
+	}
+
+	if msg.Code != handshakeMsg {
+		return nil, fmt.Errorf("expected handshake, got %x", msg.Code)
+	}
+
+	var hs protoHandshake
+	if err := msg.Decode(&hs); err != nil {
+		return nil, err
+	}
+	if (hs.ID == discover.NodeID{}) {
+		return nil, DiscInvalidIdentity
+	}
+
+	return &hs, nil
+}
+
+func updateMAC(mac hash.Hash, block cipher.Block, seed []byte) []byte {
+	aesbuf := make([]byte, aes.BlockSize)
+	block.Encrypt(aesbuf, mac.Sum(nil))
+	for i := range aesbuf {
+		aesbuf[i] ^= seed[i]
+	}
+	mac.Write(aesbuf)
+	return mac.Sum(nil)[:16]
+}
+
+func readInt24(b []byte) uint32 {
+	return uint32(b[2]) | uint32(b[1])<<8 | uint32(b[0])<<16
+}
+
+func putInt24(v uint32, b []byte) {
+	b[0] = byte(v >> 16)
+	b[1] = byte(v >> 8)
+	b[2] = byte(v)
 }
