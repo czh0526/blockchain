@@ -8,13 +8,16 @@ import (
 	"io/ioutil"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/czh0526/blockchain/rlp"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/ecies"
+	"github.com/ethereum/go-ethereum/crypto/sha3"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
@@ -356,10 +359,83 @@ func TestRLPXFrameFake(t *testing.T) {
 	}
 	// 读取消息携带的数据
 	payload, _ := ioutil.ReadAll(msg.Payload)
-	wantPayload := unhex("C401020304")
+	wantPayload := unhex("C401020304") // rlp编码的数据
+
 	// 比较携带的数据和预期是否一致
 	if !bytes.Equal(payload, wantPayload) {
 		t.Errorf("msg payload mismatch:\ngot %x\nwant %x", payload, wantPayload)
+	}
+}
+
+func TestRLPXFrameRW(t *testing.T) {
+	var (
+		aesSecret      = make([]byte, 16)
+		macSecret      = make([]byte, 16)
+		egressMACinit  = make([]byte, 32)
+		ingressMACinit = make([]byte, 32)
+	)
+	for _, s := range [][]byte{aesSecret, macSecret, egressMACinit, ingressMACinit} {
+		rand.Read(s)
+	}
+
+	// 使用buffer模拟通信通道
+	conn := new(bytes.Buffer)
+
+	// 构建1端的共享密钥
+	s1 := secrets{
+		AES:        aesSecret,
+		MAC:        macSecret,
+		EgressMAC:  sha3.NewKeccak256(),
+		IngressMAC: sha3.NewKeccak256(),
+	}
+
+	// 构建1端的读写器
+	s1.EgressMAC.Write(egressMACinit)
+	s1.IngressMAC.Write(ingressMACinit)
+	rw1 := newRLPXFrameRW(conn, s1)
+
+	// 构建2端的共享密钥
+	s2 := secrets{
+		AES:        aesSecret,
+		MAC:        macSecret,
+		EgressMAC:  sha3.NewKeccak256(),
+		IngressMAC: sha3.NewKeccak256(),
+	}
+
+	// 构建2端的读写器
+	s2.EgressMAC.Write(ingressMACinit)
+	s2.IngressMAC.Write(egressMACinit)
+	rw2 := newRLPXFrameRW(conn, s2)
+
+	for i := 0; i < 10; i++ {
+		wmsg := []interface{}{"foo", "bar", strings.Repeat("test", i)}
+		// 从1端写入数据
+		err := Send(rw1, uint64(i), wmsg)
+		if err != nil {
+			t.Fatalf("WriteMsg error (i = %d): %v", i, err)
+		}
+
+		// 从2端读出数据
+		msg, err := rw2.ReadMsg()
+		if err != nil {
+			t.Fatalf("ReadMsg error (i=%d): %v", i, err)
+		}
+
+		// 比较msg code
+		if msg.Code != uint64(i) {
+			t.Fatalf("msg code mismatch: got %d, want %d", msg.Code, i)
+		}
+		// 比较msg payload
+		wmsg2 := [3]string{}
+		if err := msg.Decode(&wmsg2); err != nil {
+			t.Fatalf("Decode msg error: %v", err)
+		}
+		msg.Payload
+		payload, _ := ioutil.ReadAll(msg.Payload)
+		wantPayload, _ := rlp.EncodeToBytes(wmsg)
+		if !bytes.Equal(payload, wantPayload) {
+			t.Fatalf("msg payload mismatch: \ngot %x\n want %x", payload, wantPayload)
+		}
 	}
 }
 

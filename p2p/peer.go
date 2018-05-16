@@ -3,8 +3,8 @@ package p2p
 import (
 	"time"
 
+	"github.com/czh0526/blockchain/rlp"
 	"github.com/ethereum/go-ethereum/p2p/discover"
-	"github.com/ethereum/go-ethereum/rlp"
 )
 
 const (
@@ -30,6 +30,5 @@ type protoHandshake struct {
 	Caps       []Cap
 	ListenPort uint64
 	ID         discover.NodeID
-
-	Rest []rlp.RawValue `rlp:"tail"`
+	Rest       []rlp.RawValue `rlp:"tail"`
 }
