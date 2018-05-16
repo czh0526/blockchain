@@ -175,26 +175,29 @@ func TestProtocolHandshake(t *testing.T) {
 			t.Errorf("dial side enc handshake failed: %v", err)
 			return
 		}
-		fmt.Println("node0 doEncHandshake ")
+		fmt.Println("doEncHandshake: node0 ==> node1 ")
 
 		// 检查nodeID是否一致
 		if remid != node1.ID {
 			t.Errorf("dial side remote id mismatch: got %v, want %v", remid, node1.ID)
 			return
 		}
+		fmt.Println("node0的remoteID与node1一致 ")
 
 		phs, err := rlpx.doProtoHandshake(hs0)
 		if err != nil {
 			t.Errorf("dial side proto handshake error: %v", err)
 			return
 		}
-		fmt.Println("node0 doProtoHandshake() ")
+		fmt.Println("doProtoHandshake: node0 ==> node1")
 
 		phs.Rest = nil
 		if !reflect.DeepEqual(phs, hs1) {
 			t.Errorf("dial side proto handshake mismatch:\n got: %s\n want: %s\n", spew.Sdump(phs), spew.Sdump(hs1))
 			return
 		}
+
+		fmt.Println("node0关闭连接")
 		rlpx.close(DiscQuitting)
 	}()
 
@@ -207,7 +210,7 @@ func TestProtocolHandshake(t *testing.T) {
 			t.Errorf("listen side env handshake failed: %v", err)
 			return
 		}
-		fmt.Println("node1 doEncHandshake ")
+		fmt.Println("doEncHandshake: node1 ==> node0 ")
 
 		if remid != node0.ID {
 			t.Errorf("listen side remote id mismatch: got %v, want %v", remid, node0.ID)
@@ -219,7 +222,7 @@ func TestProtocolHandshake(t *testing.T) {
 			t.Errorf("listen side proto handshake error: %v", err)
 			return
 		}
-		fmt.Println("node1 doProtoHandshake ")
+		fmt.Println("doProtoHandshake: node 1 ==> node0")
 
 		phs.Rest = nil
 		if !reflect.DeepEqual(phs, hs0) {
@@ -230,6 +233,7 @@ func TestProtocolHandshake(t *testing.T) {
 		if err := ExpectMsg(rlpx, discMsg, []DiscReason{DiscQuitting}); err != nil {
 			t.Errorf("error receiving disconnect: %v", err)
 		}
+		fmt.Println("node1读取到断开连接的消息")
 	}()
 
 	wg.Wait()
