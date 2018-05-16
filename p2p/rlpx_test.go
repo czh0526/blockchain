@@ -3,7 +3,9 @@ package p2p
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"reflect"
 	"sync"
@@ -237,6 +239,128 @@ func TestProtocolHandshake(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestProtocolHandshakeErrors(t *testing.T) {
+	our := &protoHandshake{
+		Version: 3,
+		Name:    "quux",
+		Caps: []Cap{
+			{"foo", 2},
+			{"bar", 3},
+		},
+	}
+
+	tests := []struct {
+		code uint64
+		msg  interface{}
+		err  error
+	}{
+		{
+			code: discMsg,
+			msg:  []DiscReason{DiscQuitting},
+			err:  DiscQuitting,
+		},
+		{
+			code: 0x989898,
+			msg:  []byte{1},
+			err:  errors.New("expected handshake, got 989898"),
+		},
+		{
+			code: handshakeMsg,
+			msg:  make([]byte, baseProtocolMaxMsgSize+2),
+			err:  errors.New("message too big"),
+		},
+		{
+			code: handshakeMsg,
+			msg:  []byte{1, 2, 3},
+			err:  newPeerError(errInvalidMsg, "(code 0) (size 4) rlp: expected input list for p2p.protoHandshake"),
+		},
+		{
+			code: handshakeMsg,
+			msg:  &protoHandshake{Version: 3},
+			err:  DiscInvalidIdentity,
+		},
+	}
+
+	for i, test := range tests {
+		p1, p2 := MsgPipe()
+		// p1向p2发送test消息
+		go Send(p1, test.code, test.msg)
+		// 从p2端读取Handshake消息
+		_, err := readProtocolHandshake(p2, our)
+		// 比较返回的结果
+		if !reflect.DeepEqual(err, test.err) {
+			t.Errorf("test %d: error mismatch: got %q, want %q", i, err, test.err)
+		}
+	}
+}
+
+type fakeHash []byte
+
+func (fakeHash) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (fakeHash) Reset() {}
+
+func (fakeHash) BlockSize() int {
+	return 0
+}
+
+func (h fakeHash) Size() int {
+	return len(h)
+}
+
+func (h fakeHash) Sum(b []byte) []byte {
+	return append(b, h...)
+}
+
+func TestRLPXFrameFake(t *testing.T) {
+	buf := new(bytes.Buffer)
+	hash := fakeHash([]byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
+	rw := newRLPXFrameRW(buf, secrets{
+		AES:        crypto.Keccak256(),
+		MAC:        crypto.Keccak256(),
+		IngressMAC: hash,
+		EgressMAC:  hash,
+	})
+
+	golden := unhex(`
+		00828ddae471818bb0bfa6b551d1cb42
+		01010101010101010101010101010101
+		ba628a4ba590cb43f7848f41c4382885
+		01010101010101010101010101010101
+		`)
+
+	// 将数据通过rlpxFrameRW写入buf
+	if err := Send(rw, 8, []uint{1, 2, 3, 4}); err != nil {
+		t.Fatalf("WriteMsg error: %v", err)
+	}
+	// 比较buf中的数据和预期是否一致
+	written := buf.Bytes()
+	if !bytes.Equal(written, golden) {
+		t.Fatalf("output mismatch:\n got: %x\n want: %x", written, golden)
+	}
+
+	// 读取消息
+	msg, err := rw.ReadMsg()
+	if err != nil {
+		t.Fatalf("ReadMsg error: %v", err)
+	}
+	if msg.Size != 5 {
+		t.Errorf("msg size mismatch: got %d, want %d", msg.Size, 5)
+	}
+	if msg.Code != 8 {
+		t.Errorf("msg code mismatch: got %d, want %d", msg.Code, 8)
+	}
+	// 读取消息携带的数据
+	payload, _ := ioutil.ReadAll(msg.Payload)
+	wantPayload := unhex("C401020304")
+	// 比较携带的数据和预期是否一致
+	if !bytes.Equal(payload, wantPayload) {
+		t.Errorf("msg payload mismatch:\ngot %x\nwant %x", payload, wantPayload)
+	}
 }
 
 func tcpPipe() (net.Conn, net.Conn, error) {
