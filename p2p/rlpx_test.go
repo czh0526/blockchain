@@ -426,11 +426,12 @@ func TestRLPXFrameRW(t *testing.T) {
 			t.Fatalf("msg code mismatch: got %d, want %d", msg.Code, i)
 		}
 		// 比较msg payload
-		wmsg2 := [3]string{}
-		if err := msg.Decode(&wmsg2); err != nil {
-			t.Fatalf("Decode msg error: %v", err)
-		}
-		msg.Payload
+		// 检查msg的内容
+		// wmsg2 := [3]string{}
+		// if err := msg.Decode(&wmsg2); err != nil {
+		//  	t.Fatalf("Decode msg error: %v", err)
+		// }
+
 		payload, _ := ioutil.ReadAll(msg.Payload)
 		wantPayload, _ := rlp.EncodeToBytes(wmsg)
 		if !bytes.Equal(payload, wantPayload) {

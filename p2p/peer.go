@@ -1,9 +1,11 @@
 package p2p
 
 import (
+	"log"
 	"time"
 
 	"github.com/czh0526/blockchain/rlp"
+	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
@@ -31,4 +33,10 @@ type protoHandshake struct {
 	ListenPort uint64
 	ID         discover.NodeID
 	Rest       []rlp.RawValue `rlp:"tail"`
+}
+
+type Peer struct {
+	rw      *conn
+	log     log.Logger
+	created mclock.AbsTime
 }
