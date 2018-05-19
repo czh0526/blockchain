@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"log"
+	"net"
 	"time"
 
 	"github.com/czh0526/blockchain/rlp"
@@ -39,4 +40,16 @@ type Peer struct {
 	rw      *conn
 	log     log.Logger
 	created mclock.AbsTime
+}
+
+func (p *Peer) ID() discover.NodeID {
+	return p.rw.id
+}
+
+func (p *Peer) Name() string {
+	return p.rw.name
+}
+
+func (p *Peer) LocalAddr() net.Addr {
+	return p.rw.fd.LocalAddr()
 }
