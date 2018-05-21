@@ -74,9 +74,20 @@ type Server struct {
 	listener     net.Listener
 	ourHandshake *protoHandshake
 
-	quit   chan struct{}
-	loopWG sync.WaitGroup
-	log    log.Logger
+	quit          chan struct{}
+	addstatic     chan *discover.Node
+	removestatic  chan *discover.Node
+	posthandshake chan *conn
+	addpeer       chan *conn
+	delpeer       chan peerDrop
+	loopWG        sync.WaitGroup
+	log           log.Logger
+}
+
+type peerDrop struct {
+	*Peer
+	err       error
+	requested bool
 }
 
 func (srv *Server) Start() (err error) {
@@ -108,6 +119,11 @@ func (srv *Server) Start() (err error) {
 	}
 
 	srv.quit = make(chan struct{})
+	srv.addstatic = make(chan *discover.Node)
+	srv.removestatic = make(chan *discover.Node)
+	srv.posthandshake = make(chan *conn)
+	srv.addpeer = make(chan *conn)
+	srv.delpeer = make(chan peerDrop)
 	var (
 	//conn      *net.UDPConn
 	//sconn     *sharedUDPConn
@@ -132,6 +148,8 @@ func (srv *Server) Start() (err error) {
 		srv.log.Warn("P2P server will be useless, neither dialing nor listening")
 	}
 
+	srv.loopWG.Add(1)
+	go srv.run()
 	srv.running = true
 	return nil
 }
@@ -155,6 +173,98 @@ func (srv *Server) startListening() error {
 		}()
 	}
 	return nil
+}
+
+func (srv *Server) run() {
+	defer srv.loopWG.Done()
+	var (
+		peers        = make(map[discover.NodeID]*Peer)
+		inboundCount = 0
+	)
+
+running:
+	for {
+		select {
+		case <-srv.quit:
+			break running
+		case n := <-srv.addstatic:
+			fmt.Printf("    ---- receive 'addstatic', n = 0x%x \n", n.ID.Bytes()[:4])
+			go func() {
+				fd, err := srv.Dialer.Dial(n)
+				if err != nil {
+					fmt.Printf("srv dial %v error: %v \n", n.String(), err)
+					return
+				}
+				if err = srv.SetupConn(fd, staticDialedConn, n); err != nil {
+					fmt.Printf("srv SetupConn error: %v \n", err)
+					return
+				}
+			}()
+		case c := <-srv.posthandshake:
+			srv.log.Info(fmt.Sprintf("    --- server get 'posthandshake' 0x%x...", c.id.Bytes()[:4]))
+			select {
+			case c.cont <- srv.encHandshakeChecks(peers, inboundCount, c):
+			case <-srv.quit:
+				break running
+			}
+		case c := <-srv.addpeer:
+			srv.log.Info(fmt.Sprintf("    --- server get 'addpeer' 0x%x...", c.id.Bytes()[:4]))
+			err := srv.protoHandshakeChecks(peers, inboundCount, c)
+			if err == nil {
+				p := newPeer(c, srv.Protocols)
+				srv.log.Info("Adding p2p peer", "name", c.name, "addr", c.fd.RemoteAddr())
+				go srv.runPeer(p)
+			}
+			select {
+			case c.cont <- err:
+			case <-srv.quit:
+				break running
+			}
+		}
+	}
+}
+
+func (srv *Server) runPeer(p *Peer) {
+	if srv.newPeerHook != nil {
+		srv.newPeerHook(p)
+	}
+
+	remoteRequested, err := p.run()
+	srv.delpeer <- peerDrop{p, err, remoteRequested}
+}
+
+func (srv *Server) Self() *discover.Node {
+	if !srv.running {
+		return &discover.Node{IP: net.ParseIP("0.0.0.0")}
+	}
+	return srv.makeSelf(srv.listener)
+}
+
+func (srv *Server) makeSelf(listener net.Listener) *discover.Node {
+	if listener == nil {
+		return &discover.Node{IP: net.ParseIP("0.0.0.0"), ID: discover.PubkeyID(&srv.PrivateKey.PublicKey)}
+	}
+	addr := listener.Addr().(*net.TCPAddr)
+	return &discover.Node{
+		ID:  discover.PubkeyID(&srv.PrivateKey.PublicKey),
+		IP:  addr.IP,
+		TCP: uint16(addr.Port),
+	}
+}
+
+func (srv *Server) encHandshakeChecks(peers map[discover.NodeID]*Peer, inboundCount int, c *conn) error {
+	switch {
+	case peers[c.id] != nil:
+		return DiscAlreadyConnected
+	case c.id == srv.Self().ID:
+		return DiscSelf
+	default:
+		return nil
+	}
+}
+
+func (srv *Server) protoHandshakeChecks(peers map[discover.NodeID]*Peer, inboundCount int, c *conn) error {
+	return srv.encHandshakeChecks(peers, inboundCount, c)
 }
 
 type tempError interface {
@@ -233,19 +343,61 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *discover.Node) e
 	}
 
 	var err error
+
+	// RLPx handshake
 	if c.id, err = c.doEncHandshake(srv.PrivateKey, dialDest); err != nil {
 		srv.log.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
-	srv.log.Info(fmt.Sprintf("RLPx handshake done. id = 0x%x", c.id.Bytes()))
+	srv.log.Info(fmt.Sprintf("RLPx handshake done. id = 0x%x...", c.id.Bytes()[:4]))
+	if dialDest != nil && c.id != dialDest.ID {
+		return DiscUnexpectedIdentity
+	}
+	err = srv.checkpoint(c, srv.posthandshake)
+	if err != nil {
+		return err
+	}
 
+	// proto handshake
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		srv.log.Trace("Failed proto handshake", "err", err)
 	}
-	srv.log.Info(fmt.Sprintf("proto handshake done. phs = %v", phs))
+	if phs.ID != c.id {
+		return DiscUnexpectedIdentity
+	}
+	srv.log.Info(fmt.Sprintf("proto handshake done. phs = 0x%x...", phs.ID.Bytes()[:4]))
+
+	c.caps, c.name = phs.Caps, phs.Name
+	err = srv.checkpoint(c, srv.addpeer)
+	if err != nil {
+		return err
+	}
 
 	return nil
+}
+
+func (srv *Server) checkpoint(c *conn, stage chan<- *conn) error {
+	select {
+	case stage <- c:
+	case <-srv.quit:
+		return errServerStopped
+	}
+	select {
+	case err := <-c.cont:
+		return err
+	case <-srv.quit:
+		return errServerStopped
+	}
+}
+
+func (srv *Server) AddPeer(node *discover.Node) {
+	fmt.Println("AddPeer()")
+	select {
+	case srv.addstatic <- node:
+		fmt.Println("Write node to addstatic.")
+	case <-srv.quit:
+	}
 }
 
 type sharedUDPConn struct {

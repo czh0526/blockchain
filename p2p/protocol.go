@@ -7,6 +7,22 @@ type Cap struct {
 	Version uint
 }
 
+type capsByNameAndVersion []Cap
+
+func (cs capsByNameAndVersion) Len() int      { return len(cs) }
+func (cs capsByNameAndVersion) Swap(i, j int) { cs[i], cs[j] = cs[j], cs[i] }
+func (cs capsByNameAndVersion) Less(i, j int) bool {
+	if cs[i].Name < cs[j].Name {
+		return true
+	}
+
+	if cs[i].Name == cs[j].Name && cs[i].Version < cs[j].Version {
+		return true
+	}
+
+	return false
+}
+
 type Protocol struct {
 	Name     string
 	Version  uint

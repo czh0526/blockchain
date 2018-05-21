@@ -1,6 +1,9 @@
 package p2p
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	errInvalidMsgCode = iota
@@ -33,6 +36,8 @@ func newPeerError(code int, format string, v ...interface{}) *peerError {
 	}
 	return err
 }
+
+var errProtocolReturned = errors.New("protocol returned")
 
 type DiscReason uint
 
@@ -77,4 +82,23 @@ func (d DiscReason) String() string {
 
 func (d DiscReason) Error() string {
 	return d.String()
+}
+
+func discReasonForError(err error) DiscReason {
+	if reason, ok := err.(DiscReason); ok {
+		return reason
+	}
+	if err == errProtocolReturned {
+		return DiscQuitting
+	}
+	peerError, ok := err.(*peerError)
+	if ok {
+		switch peerError.code {
+		case errInvalidMsgCode, errInvalidMsg:
+			return DiscProtocolError
+		default:
+			return DiscSubprotocolError
+		}
+	}
+	return DiscSubprotocolError
 }
