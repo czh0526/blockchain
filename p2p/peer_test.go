@@ -75,7 +75,7 @@ func TestPeerProtoReadMsg(t *testing.T) {
 		}
 	}
 
-	fmt.Sprintf("TestCase Finished.")
+	fmt.Sprintln("TestCase Finished.")
 }
 
 func TestPeerProtoEncodeMsg(t *testing.T) {

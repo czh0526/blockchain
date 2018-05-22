@@ -34,15 +34,6 @@ type transport interface {
 	close(err error)
 }
 
-type connFlag int
-
-const (
-	dynDialedConn connFlag = 1 << iota
-	staticDialedConn
-	inboundConn
-	trustedConn
-)
-
 type conn struct {
 	fd net.Conn
 	transport
