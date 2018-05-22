@@ -10,8 +10,10 @@ import (
 func testPeer(protos []Protocol) (func(), *conn, *Peer, <-chan error) {
 	// 生成读写管道
 	fd1, fd2 := net.Pipe()
-	c1 := &conn{fd: fd1, transport: newTestTransport(randomID(), fd1)}
-	c2 := &conn{fd: fd2, transport: newTestTransport(randomID(), fd2)}
+	id1 := randomID()
+	c1 := &conn{id: id1, fd: fd1, transport: newTestTransport(id1, fd1)}
+	id2 := randomID()
+	c2 := &conn{id: id2, fd: fd2, transport: newTestTransport(id2, fd2)}
 	for _, p := range protos {
 		c1.caps = append(c1.caps, p.cap())
 		c2.caps = append(c2.caps, p.cap())
@@ -36,12 +38,15 @@ func TestPeerProtoReadMsg(t *testing.T) {
 		Name:   "a",
 		Length: 5,
 		Run: func(peer *Peer, rw MsgReadWriter) error {
+			// 验证 Msg 2
 			if err := ExpectMsg(rw, 2, []uint{1}); err != nil {
 				t.Error(err)
 			}
+			// 验证 Msg 3
 			if err := ExpectMsg(rw, 3, []uint{2}); err != nil {
 				t.Error(err)
 			}
+			// 验证 Msg 4
 			if err := ExpectMsg(rw, 4, []uint{3}); err != nil {
 				t.Error(err)
 			}
@@ -53,7 +58,7 @@ func TestPeerProtoReadMsg(t *testing.T) {
 	// 启动 read Peer
 	closer, rw, _, errc := testPeer([]Protocol{proto})
 	defer closer()
-	fmt.Println("启动支持protocol协议的peer节点")
+	fmt.Println("启动支持protocol协议的peer节点, 验证后续接收到的消息.")
 
 	// 发送消息
 	fmt.Println("发送消息：baseProtocolLength +2")
@@ -71,4 +76,30 @@ func TestPeerProtoReadMsg(t *testing.T) {
 	}
 
 	fmt.Sprintf("TestCase Finished.")
+}
+
+func TestPeerProtoEncodeMsg(t *testing.T) {
+	proto := Protocol{
+		Name:   "a",
+		Length: 2,
+		Run: func(peer *Peer, rw MsgReadWriter) error {
+			// 发送一个错误消息
+			if err := SendItems(rw, 2); err == nil {
+				t.Error("expected error for out-of-range msg code, got nil.")
+			}
+			// 发送一个正确消息
+			if err := SendItems(rw, 1, "foo", "bar"); err != nil {
+				t.Errorf("write error: %v", err)
+			}
+			return nil
+		},
+	}
+
+	closer, rw, _, _ := testPeer([]Protocol{proto})
+	defer closer()
+
+	// 验证正确消息 17 = baseProtocolLength + 1
+	if err := ExpectMsg(rw, 17, []string{"foo", "bar"}); err != nil {
+		t.Error(err)
+	}
 }
