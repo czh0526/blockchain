@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/czh0526/blockchain/log"
 	"github.com/czh0526/blockchain/rlp"
 	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
@@ -122,7 +122,6 @@ func newPeer(conn *conn, protocols []Protocol) *Peer {
 		closed:   make(chan struct{}),
 		log:      log.New("id", conn.id, "conn", conn.flags),
 	}
-	p.log.SetHandler(log.StdoutHandler)
 	return p
 }
 

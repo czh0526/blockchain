@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/czh0526/blockchain/log"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
@@ -44,6 +44,10 @@ type conn struct {
 	name  string
 }
 
+func (c *conn) is(f connFlag) bool {
+	return c.flags&f != 0
+}
+
 type Config struct {
 	PrivateKey      *ecdsa.PrivateKey `toml:"-"`
 	MaxPeers        int
@@ -62,6 +66,7 @@ type Server struct {
 	newPeerHook  func(*Peer)
 	running      bool
 
+	ntab         discoverTable
 	listener     net.Listener
 	ourHandshake *protoHandshake
 
@@ -91,7 +96,6 @@ func (srv *Server) Start() (err error) {
 	srv.log = srv.Config.Logger
 	if srv.log == nil {
 		srv.log = log.New()
-		srv.log.SetHandler(log.StdoutHandler)
 	}
 
 	// 检查私钥

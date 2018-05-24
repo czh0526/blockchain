@@ -7,14 +7,14 @@ import (
 	"net"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/czh0526/blockchain/log"
 	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
 var (
 	errSelf             = errors.New("is self")
 	errAlreadyDialing   = errors.New("already dialing")
-	errAlreadyConnected = errors.New("aliready connected")
+	errAlreadyConnected = errors.New("already connected")
 	errRecentlyDialed   = errors.New("recently dialed")
 	errNotWhitelisted   = errors.New("not contained in netrestrict whitelist")
 )
@@ -98,8 +98,23 @@ func (h dialHistory) contains(id discover.NodeID) bool {
 	return false
 }
 
+func (h *dialHistory) expire(now time.Time) {
+	for h.Len() > 0 && h.min().exp.Before(now) {
+		heap.Pop(h)
+	}
+}
+
+type discoverTable interface {
+	Self() *discover.Node
+	Close()
+	Resolve(target discover.NodeID) *discover.Node
+	Lookup(target discover.NodeID) []*discover.Node
+	ReadRandomNodes([]*discover.Node) int
+}
+
 type dialstate struct {
 	maxDynDials int
+	ntab        discoverTable
 
 	lookupRunning bool
 	dialing       map[discover.NodeID]connFlag
@@ -111,12 +126,34 @@ type dialstate struct {
 	bootnodes     []*discover.Node
 }
 
+func newDialState(static []*discover.Node, bootnodes []*discover.Node, ntab discoverTable, maxdyn int) *dialstate {
+	s := &dialstate{
+		maxDynDials: maxdyn,
+		ntab:        ntab,
+		static:      make(map[discover.NodeID]*dialTask),
+		dialing:     make(map[discover.NodeID]connFlag),
+		bootnodes:   make([]*discover.Node, len(bootnodes)),
+		hist:        new(dialHistory),
+	}
+	copy(s.bootnodes, bootnodes)
+	for _, n := range static {
+		s.addStatic(n)
+	}
+	return s
+}
+
+func (s *dialstate) addStatic(n *discover.Node) {
+	s.static[n.ID] = &dialTask{flags: staticDialedConn, dest: n}
+}
+
 func (s *dialstate) taskDone(t task, now time.Time) {
 	switch t := t.(type) {
 	case *dialTask:
-		fmt.Printf("taskDone(), task is %v \n", t)
+		s.hist.add(t.dest.ID, now.Add(dialHistoryExpiration))
+		delete(s.dialing, t.dest.ID)
 	case *discoverTask:
-		fmt.Printf("taskDone(), task is %v \n", t)
+		s.lookupRunning = false
+		s.lookupBuf = append(s.lookupBuf, t.results...)
 	}
 }
 
@@ -132,11 +169,27 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 			log.Trace("Skipping dial candidate", "id", n.ID, "addr", &net.TCPAddr{IP: n.IP, Port: int(n.TCP)}, "err", err)
 			return false
 		}
-		newtasks = append(newtasks, &dialTask{})
+		log.Trace(fmt.Sprintf("添加dialTask() ==> 0x%x", n.ID.Bytes()))
+		s.dialing[n.ID] = flag
+		newtasks = append(newtasks, &dialTask{flags: flag, dest: n})
 		return true
 	}
 
 	needDynDials := s.maxDynDials
+	// 减去已经建立连接的
+	for _, p := range peers {
+		if p.rw.is(dynDialedConn) {
+			needDynDials--
+		}
+	}
+	// 减去正在建立连接的
+	for _, flag := range s.dialing {
+		if flag&dynDialedConn != 0 {
+			needDynDials--
+		}
+	}
+
+	s.hist.expire(now)
 
 	// 将static中的dialTask放入newtasks
 	for id, t := range s.static {
@@ -160,6 +213,37 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 		if addDial(dynDialedConn, bootnode) {
 			needDynDials--
 		}
+	}
+
+	// 从discoverTable中选出随机节点进行连接
+	randomCandidates := needDynDials / 2
+	if randomCandidates > 0 {
+		n := s.ntab.ReadRandomNodes(s.randomNodes)
+		for i := 0; i < randomCandidates && i < n; i++ {
+			if addDial(dynDialedConn, s.randomNodes[i]) {
+				needDynDials--
+			}
+		}
+	}
+
+	// 从 lookupBuf 中选出节点进行连接
+	i := 0
+	for ; i < len(s.lookupBuf) && needDynDials > 0; i++ {
+		if addDial(dynDialedConn, s.lookupBuf[i]) {
+			needDynDials--
+		}
+	}
+	s.lookupBuf = s.lookupBuf[:copy(s.lookupBuf, s.lookupBuf[i:])]
+
+	// 如果任务数量不够，构建一个discoverTask任务
+	if len(s.lookupBuf) < needDynDials && !s.lookupRunning {
+		s.lookupRunning = true
+		newtasks = append(newtasks, &discoverTask{})
+	}
+
+	if nRunning == 0 && len(newtasks) == 0 && s.hist.Len() > 0 {
+		t := &waitExpireTask{s.hist.min().exp.Sub(now)}
+		newtasks = append(newtasks, t)
 	}
 
 	return newtasks
@@ -190,10 +274,25 @@ type dialTask struct {
 }
 
 func (t *dialTask) Do(srv *Server) {
-	fmt.Println("        dialTask.Do()")
+	if t.dest.Incomplete() {
+		if !t.resolve(srv) {
+			return
+		}
+	}
+
+	err := t.dial(srv, t.dest)
+	if err != nil {
+		log.Trace("Dial error", "task", t, "err", err)
+		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
+			if t.resolve(srv) {
+				t.dial(srv, t.dest)
+			}
+		}
+	}
 }
 
 type discoverTask struct {
+	results []*discover.Node
 }
 
 func (t *discoverTask) Do(srv *Server) {
@@ -201,6 +300,7 @@ func (t *discoverTask) Do(srv *Server) {
 }
 
 type waitExpireTask struct {
+	time.Duration
 }
 
 func (t *waitExpireTask) Do(srv *Server) {
