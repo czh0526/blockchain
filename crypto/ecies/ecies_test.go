@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	eth_ecies "github.com/ethereum/go-ethereum/crypto/ecies"
+	eth_ecies "github.com/czh0526/blockchain/crypto/ecies"
 )
 
 func TestEncryptDecrypt(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/czh0526/blockchain/crypto"
 )
 
 var parseNodeTests = []struct {

@@ -1,6 +1,6 @@
 package p2p
 
-import "github.com/ethereum/go-ethereum/p2p/discover"
+import "github.com/czh0526/blockchain/p2p/discover"
 
 type Cap struct {
 	Name    string

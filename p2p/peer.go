@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/czh0526/blockchain/common/mclock"
 	"github.com/czh0526/blockchain/log"
+	"github.com/czh0526/blockchain/p2p/discover"
 	"github.com/czh0526/blockchain/rlp"
-	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/p2p/discover"
 )
 
 const (

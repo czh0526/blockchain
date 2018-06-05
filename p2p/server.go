@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/czh0526/blockchain/log"
-	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/czh0526/blockchain/p2p/discover"
 )
 
 const (

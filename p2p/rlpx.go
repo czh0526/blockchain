@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/czh0526/blockchain/crypto"
+	"github.com/czh0526/blockchain/crypto/ecies"
+	"github.com/czh0526/blockchain/crypto/secp256k1"
+	"github.com/czh0526/blockchain/crypto/sha3"
+	"github.com/czh0526/blockchain/p2p/discover"
 	"github.com/czh0526/blockchain/rlp"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/crypto/ecies"
-	"github.com/ethereum/go-ethereum/crypto/secp256k1"
-	"github.com/ethereum/go-ethereum/crypto/sha3"
-	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/golang/snappy"
 )
 

@@ -7,7 +7,7 @@ import (
 	"net"
 	"sort"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/czh0526/blockchain/common"
 )
 
 const (

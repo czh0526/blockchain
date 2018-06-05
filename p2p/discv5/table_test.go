@@ -10,8 +10,8 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/czh0526/blockchain/common"
+	"github.com/czh0526/blockchain/crypto"
 )
 
 type closeTest struct {
