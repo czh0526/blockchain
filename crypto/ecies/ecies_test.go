@@ -5,19 +5,17 @@ import (
 	"crypto/rand"
 	"fmt"
 	"testing"
-
-	eth_ecies "github.com/czh0526/blockchain/crypto/ecies"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
 	// 生成密钥1
-	prv1, err := eth_ecies.GenerateKey(rand.Reader, eth_ecies.DefaultCurve, nil)
+	prv1, err := GenerateKey(rand.Reader, DefaultCurve, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 		t.FailNow()
 	}
 	// 生成密钥2
-	prv2, err := eth_ecies.GenerateKey(rand.Reader, eth_ecies.DefaultCurve, nil)
+	prv2, err := GenerateKey(rand.Reader, DefaultCurve, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 		t.FailNow()
@@ -25,7 +23,7 @@ func TestEncryptDecrypt(t *testing.T) {
 
 	message := []byte("Hello, world.")
 	// 用公钥2加密文本
-	ct, err := eth_ecies.Encrypt(rand.Reader, &prv2.PublicKey, message, nil, nil)
+	ct, err := Encrypt(rand.Reader, &prv2.PublicKey, message, nil, nil)
 	if err != nil {
 		fmt.Println(err.Error())
 		t.FailNow()

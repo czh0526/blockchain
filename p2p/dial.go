@@ -107,9 +107,9 @@ func (h *dialHistory) expire(now time.Time) {
 type discoverTable interface {
 	Self() *discover.Node
 	Close()
-	Resolve(target discover.NodeID) *discover.Node
+	Resolve(target discover.NodeID) *discover.Node // 查找某一个节点
 	Lookup(target discover.NodeID) []*discover.Node
-	ReadRandomNodes([]*discover.Node) int
+	ReadRandomNodes([]*discover.Node) int // 获取随机数量的节点
 }
 
 type dialstate struct {
@@ -289,6 +289,20 @@ func (t *dialTask) Do(srv *Server) {
 			}
 		}
 	}
+}
+
+func (t *dialTask) resolve(srv *Server) bool {
+	fmt.Println("dialTask.resolve() has not be implemented. ")
+	return false
+}
+
+type dialError struct {
+	error
+}
+
+func (t *dialTask) dial(srv *Server, dest *discover.Node) error {
+	fmt.Println("dialTask.dial() has not be implemented. ")
+	return errors.New("func has not be implemented.")
 }
 
 type discoverTask struct {

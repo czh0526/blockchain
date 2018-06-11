@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"math/big"
 
@@ -16,6 +17,27 @@ var (
 
 func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(S256(), rand.Reader)
+}
+
+/**
+(数字签名算法) Digital Signature Algorithm
+*/
+
+// []byte ==> ecdsa.PublicKey
+func ToECDSAPub(pub []byte) *ecdsa.PublicKey {
+	if len(pub) == 0 {
+		return nil
+	}
+	x, y := elliptic.Unmarshal(S256(), pub)
+	return &ecdsa.PublicKey{Curve: S256(), X: x, Y: y}
+}
+
+// ecdsa.PublicKey ==> []byte
+func FromECDSAPub(pub *ecdsa.PublicKey) []byte {
+	if pub == nil || pub.X == nil || pub.Y == nil {
+		return nil
+	}
+	return elliptic.Marshal(S256(), pub.X, pub.Y)
 }
 
 func Keccak256(data ...[]byte) []byte {

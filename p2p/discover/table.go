@@ -48,7 +48,7 @@ type bucket struct {
 func (b *bucket) bump(n *Node) bool {
 	for i := range b.entries {
 		if b.entries[i].ID == n.ID {
-			copy(b.entries[1:], b.entries[:i-1])
+			copy(b.entries[1:], b.entries[:i])
 			b.entries[0] = n
 			return true
 		}
@@ -72,6 +72,8 @@ type Table struct {
 	bondmu    sync.Mutex
 	bonding   map[NodeID]*bondproc
 	bondslots chan struct{}
+
+	nodeAddedHook func(*Node)
 
 	net  transport
 	self *Node
@@ -234,6 +236,7 @@ loop:
 
 func (tab *Table) doRefresh(done chan struct{}) {
 	defer close(done)
+	log.Info(fmt.Sprintf("Table.doRefresh() was called at %s", time.Now().Format("2006-01-02 15:04:05")))
 
 	tab.loadSeedNodes(true)
 	// 找到三个离自己最近的节点
@@ -245,6 +248,10 @@ func (tab *Table) doRefresh(done chan struct{}) {
 		crand.Read(target[:])
 		tab.lookup(target, false)
 	}
+}
+
+func (tab *Table) Lookup(targetID NodeID) []*Node {
+	return tab.lookup(targetID, true)
 }
 
 func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
@@ -259,8 +266,9 @@ func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
 
 	asked[tab.self.ID] = true
 
+	// 取就近节点进行 findnode 询问
 	for {
-		// 取得最多 bucketSize 个就近的节点
+		// 从 NodeDB 中取得最多 bucketSize 个就近的节点
 		tab.mutex.Lock()
 		result = tab.closest(target, bucketSize)
 		tab.mutex.Unlock()
@@ -268,19 +276,22 @@ func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
 			break
 		}
 
-		// 没有取得就近节点，执行refresh，重新查询就近节点
+		// 没有取得就近节点，执行refresh, 等NodeDB更新后，重新查询就近节点
 		<-tab.refresh()
+		// refreshIsEmpty 只生效一次
 		refreshIfEmpty = false
 	}
 
 	for {
+		// 按距离Target远近，一次执行 alpha(3)个 findnode + bond, 然后等待执行结果
 		for i := 0; i < len(result.entries) && pendingQueries < alpha; i++ {
 			n := result.entries[i]
-			// 启动节点查找例程
+
 			if !asked[n.ID] {
 				asked[n.ID] = true
 				pendingQueries++
 
+				// 启动节点查找例程
 				go func() {
 					// 发送 findnode 消息, 找到未知节点列表
 					r, err := tab.net.findnode(n.ID, n.addr(), targetID)
@@ -300,10 +311,12 @@ func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
 				}()
 			}
 		}
+
+		// result.entries 中的节点都被查询过
 		if pendingQueries == 0 {
 			break
 		}
-		// wait for the next reply
+		// 一个 bond 过程执行完毕，将可用节点设置在 result 前面
 		for _, n := range <-reply {
 			if n != nil && !seen[n.ID] {
 				seen[n.ID] = true
@@ -313,6 +326,64 @@ func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
 		pendingQueries--
 	}
 	return result.entries
+}
+
+func (tab *Table) ReadRandomNodes(buf []*Node) (n int) {
+	if !tab.isInitDone() {
+		return 0
+	}
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	// Find all non-empty buckets and get a fresh slice of their entries.
+	var buckets [][]*Node
+	for _, b := range tab.buckets {
+		if len(b.entries) > 0 {
+			buckets = append(buckets, b.entries[:])
+		}
+	}
+	if len(buckets) == 0 {
+		return 0
+	}
+	// Shuffle the buckets.
+	for i := len(buckets) - 1; i > 0; i-- {
+		j := tab.rand.Intn(len(buckets))
+		buckets[i], buckets[j] = buckets[j], buckets[i]
+	}
+	// Move head of each bucket into buf, removing buckets that become empty.
+	var i, j int
+	for ; i < len(buf); i, j = i+1, (j+1)%len(buckets) {
+		b := buckets[j]
+		buf[i] = &(*b[0])
+		buckets[j] = b[1:]
+		if len(b) == 1 {
+			buckets = append(buckets[:j], buckets[j+1:]...)
+		}
+		if len(buckets) == 0 {
+			break
+		}
+	}
+	return i + 1
+}
+
+func (tab *Table) Resolve(targetID NodeID) *Node {
+	// If the node is present in the local table, no
+	// network interaction is required.
+	hash := crypto.Keccak256Hash(targetID[:])
+	tab.mutex.Lock()
+	cl := tab.closest(hash, 1)
+	tab.mutex.Unlock()
+	if len(cl.entries) > 0 && cl.entries[0].ID == targetID {
+		return cl.entries[0]
+	}
+	// Otherwise, do a network lookup.
+	result := tab.Lookup(targetID)
+	for _, n := range result {
+		if n.ID == targetID {
+			return n
+		}
+	}
+	return nil
 }
 
 func (tab *Table) closest(target common.Hash, nresults int) *nodesByDistance {
@@ -443,6 +514,7 @@ func (tab *Table) pingpong(w *bondproc, pinged bool, id NodeID, addr *net.UDPAdd
 
 	// 进入被动等待状态
 	if !pinged {
+		log.Trace(fmt.Sprintf("等待消息: PONG/v4 <== %v:%v/%v ", addr.IP, addr.Port, tcpPort))
 		tab.net.waitping(id)
 	}
 
@@ -481,13 +553,14 @@ func (tab *Table) bond(pinged bool, id NodeID, addr *net.UDPAddr, tcpPort uint16
 		return nil, errors.New("still initializing")
 	}
 
-	// 得到目标节点及其状态
+	// 检查目标节点的状态是否已经失效
 	node, fails := tab.db.node(id), tab.db.findFails(id)
 	age := time.Since(tab.db.bondTime(id))
 	var result error
 	if fails > 0 || age > nodeDBNodeExpiration {
-		log.Trace("Starting bonding ping/pong", "id", id, "known", node != nil, "failcount", fails, "age", age)
+		log.Trace(fmt.Sprintf("Starting bonding ping/pong, id = %x known = %v", id.Bytes()[:4], node != nil))
 
+		// 检查目标节点的 bondproc 状态
 		tab.bondmu.Lock()
 		w := tab.bonding[id]
 		if w != nil {
@@ -514,6 +587,7 @@ func (tab *Table) bond(pinged bool, id NodeID, addr *net.UDPAddr, tcpPort uint16
 
 	if node != nil {
 		tab.add(node)
+		log.Info(fmt.Sprintf("添加一个节点：%v:%v/%v", node.IP, node.TCP, node.UDP))
 		tab.db.updateFindFails(id, 0)
 	}
 	return node, result
@@ -633,6 +707,22 @@ func pushNode(list []*Node, n *Node, max int) ([]*Node, *Node) {
 	return list, removed
 }
 
+// 将 nodes 放入 tab 中
+func (tab *Table) stuff(nodes []*Node) {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	for _, n := range nodes {
+		if n.ID == tab.self.ID {
+			continue
+		}
+		b := tab.bucket(n.sha)
+		if len(b.entries) < bucketSize {
+			tab.bumpOrAdd(b, n)
+		}
+	}
+}
+
 func (tab *Table) addIP(b *bucket, ip net.IP) bool {
 	if netutil.IsLAN(ip) {
 		return true
@@ -669,9 +759,11 @@ type nodesByDistance struct {
 	target  common.Hash
 }
 
+// entries 中的节点距离 Target 由近及远。
 func (h *nodesByDistance) push(n *Node, maxElems int) {
 	// 通过给定函数，进行n的定位ix
 	ix := sort.Search(len(h.entries), func(i int) bool {
+		// node i --> target > n --> target
 		return distcmp(h.target, h.entries[i].sha, n.sha) > 0
 	})
 

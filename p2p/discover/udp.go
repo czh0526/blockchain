@@ -15,6 +15,8 @@ import (
 	"github.com/czh0526/blockchain/rlp"
 )
 
+const Version = 4
+
 var (
 	errPacketTooSmall   = errors.New("too small")
 	errBadHash          = errors.New("bad hash")
@@ -51,7 +53,7 @@ type pending struct {
 	from     NodeID
 	ptype    byte
 	deadline time.Time
-	callback func(resp interface{}) (done bool)
+	callback func(resp interface{}) (done bool) // 返回值说明 (true：pending队列中保留消息, false: pending队列中删除消息)
 	errc     chan<- error
 }
 
@@ -88,6 +90,15 @@ type udp struct {
 	closing     chan struct{}
 
 	*Table
+}
+
+func ListenUDP(c conn, cfg Config) (*Table, error) {
+	tab, _, err := newUDP(c, cfg)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("UDP listener up", "self", tab.self)
+	return tab, nil
 }
 
 func newUDP(c conn, cfg Config) (*Table, *udp, error) {
@@ -147,6 +158,7 @@ func (t *udp) loop() {
 		timeout.Stop()
 	}
 
+	log.Info(fmt.Sprintf("start udp loop() localAddr = %v, realAddr = %v", t.conn.LocalAddr(), t.ourEndpoint))
 	for {
 		resetTimeout()
 
@@ -183,15 +195,17 @@ func (t *udp) loop() {
 			r.matched <- matched
 
 		case now := <-timeout.C:
+			log.Trace(fmt.Sprintf("timeout 定时器调度: plist len = %d, %s", plist.Len(), now.Format("2006-01-02 15:04:05")))
 			nextTimeout = nil
 
 			// 删除过期的 pending
-			for el := plist.Front(); el != nil; el.Next() {
+			for el := plist.Front(); el != nil; el = el.Next() {
 				p := el.Value.(*pending)
 				if now.After(p.deadline) || now.Equal(p.deadline) {
 					p.errc <- errTimeout
 					plist.Remove(el)
 					contTimeouts++
+					log.Trace(fmt.Sprintf("删除 pending 对象, ptype = %v, node id = 0x%x..., contTimeouts = %v, plist len = %v.", p.ptype, p.from[:4], contTimeouts, plist.Len()))
 				}
 			}
 
@@ -212,6 +226,7 @@ func (t *udp) readLoop(unhandled chan<- ReadPacket) {
 		defer close(unhandled)
 	}
 
+	log.Info(fmt.Sprintf("start udp readLoop(), localAddr = %v, realAddr = %v", t.conn.LocalAddr(), t.ourEndpoint))
 	buf := make([]byte, 1280)
 	for {
 		// 将UDP报文中的数据读入buf
@@ -248,7 +263,7 @@ func (t *udp) send(toaddr *net.UDPAddr, ptype byte, req packet) ([]byte, error) 
 
 func (t *udp) write(toaddr *net.UDPAddr, what string, packet []byte) error {
 	_, err := t.conn.WriteToUDP(packet, toaddr)
-	log.Trace(">> "+what, "addr", toaddr, "err", err)
+	log.Trace(fmt.Sprintf(">> %s, addr = %v, err = %v", what, toaddr, err))
 	return err
 }
 
@@ -256,12 +271,12 @@ func (t *udp) handlePacket(from *net.UDPAddr, buf []byte) error {
 	// 包解码
 	packet, fromID, hash, err := decodePacket(buf)
 	if err != nil {
-		log.Debug("Bad discv4 packet", "addr", from, "err", err)
+		log.Debug(fmt.Sprintf("<< %s, addr = %v, err = %v", packet.name(), from, err))
 		return err
 	}
 	// 包处理
 	err = packet.handle(t, from, fromID, hash)
-	log.Trace("<< "+packet.name(), "addr", from, "err", err)
+	log.Trace(fmt.Sprintf("<< %s, addr = %v, err = %v", packet.name(), from, err))
 	return err
 }
 
@@ -304,7 +319,7 @@ func (t *udp) findnode(toid NodeID, toaddr *net.UDPAddr, target NodeID) ([]*Node
 			nreceived++
 			n, err := t.nodeFromRPC(toaddr, rn)
 			if err != nil {
-				log.Trace("Invalid neighbor node received， “ip", rn.IP, "addr", toaddr, "err", err)
+				log.Trace("Invalid neighbor node received", "ip", rn.IP, "addr", toaddr, "err", err)
 				continue
 			}
 			nodes = append(nodes, n)
@@ -326,6 +341,7 @@ func (t *udp) pending(id NodeID, ptype byte, callback func(interface{}) bool) <-
 	p := &pending{from: id, ptype: ptype, callback: callback, errc: ch}
 	select {
 	case t.addpending <- p:
+		//log.Trace(fmt.Sprintf("挂起消息：ptype = %v, node id = 0x%x...", ptype, id[:4]))
 	case <-t.closing:
 		ch <- errClosed
 	}
@@ -387,6 +403,7 @@ func (req *ping) handle(t *udp, from *net.UDPAddr, fromID NodeID, mac []byte) er
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
 	})
 	if !t.handleReply(fromID, pingPacket, req) {
+		// 如果pending队列中没有ping ==> 没有调用过 waitping()
 		go t.bond(true, fromID, from, req.From.TCP)
 	}
 	return nil

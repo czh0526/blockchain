@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const Version = 4
-
 var nodeDBKeyTests = []struct {
 	id    NodeID
 	field string
