@@ -1,6 +1,8 @@
 package node
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/czh0526/blockchain/crypto"
@@ -27,13 +29,19 @@ func (n *Node) Start() error {
 		return ErrNodeRunning
 	}
 
-	key, err := crypto.GenerateKey()
+	currDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	if err != nil {
+		return err
+	}
+	keyfilepath := filepath.Join(currDir, "nodekey")
+	key, err := crypto.LoadECDSA(keyfilepath)
 	if err != nil {
 		return err
 	}
 
 	n.serverConfig = p2p.Config{
 		PrivateKey: key,
+		ListenAddr: ":30303",
 	}
 	running := &p2p.Server{Config: n.serverConfig}
 	if err := running.Start(); err != nil {

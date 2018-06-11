@@ -1,0 +1,6 @@
+# Folders 
+.vscode
+
+#Files
+cmd/shadow/nodekey 
+cmd/shadow/debug
