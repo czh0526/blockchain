@@ -97,7 +97,7 @@ func ListenUDP(c conn, cfg Config) (*Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Info(fmt.Sprintf("[UDP]: udp listen at encode://%x...@[%s]:%v", tab.self.ID[:4], tab.self.IP, tab.self.UDP))
+	log.Info(fmt.Sprintf("[UDP]: udp listen at %s", tab.self))
 	return tab, nil
 }
 
