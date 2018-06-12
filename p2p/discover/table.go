@@ -240,12 +240,14 @@ func (tab *Table) doRefresh(done chan struct{}) {
 
 	tab.loadSeedNodes(true)
 	// 找到三个离自己最近的节点
+	log.Info(fmt.Sprintf("Table.lookup(), find self.ID 0x%x...", tab.self.ID[:4]))
 	tab.lookup(tab.self.ID, false)
 
 	// 通过找不存在的节点，发现全网的节点
 	for i := 0; i < 3; i++ {
 		var target NodeID
 		crand.Read(target[:])
+		log.Info(fmt.Sprintf("Table.lookup(), find rand ID 0x%x...", target[:4]))
 		tab.lookup(target, false)
 	}
 }
@@ -293,6 +295,7 @@ func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
 
 				// 启动节点查找例程
 				go func() {
+					log.Info(fmt.Sprintf("<FINDNODE> ==> %s, target = 0x%x ", n.addr(), targetID[:4]))
 					// 发送 findnode 消息, 找到未知节点列表
 					r, err := tab.net.findnode(n.ID, n.addr(), targetID)
 					if err != nil {
@@ -514,7 +517,7 @@ func (tab *Table) pingpong(w *bondproc, pinged bool, id NodeID, addr *net.UDPAdd
 
 	// 进入被动等待状态
 	if !pinged {
-		log.Trace(fmt.Sprintf("等待消息: PONG/v4 <== %v:%v/%v ", addr.IP, addr.Port, tcpPort))
+		log.Trace(fmt.Sprintf("等待远程发起的 bond: <== %v:%v/%v ", addr.IP, addr.Port, tcpPort))
 		tab.net.waitping(id)
 	}
 
@@ -587,7 +590,7 @@ func (tab *Table) bond(pinged bool, id NodeID, addr *net.UDPAddr, tcpPort uint16
 
 	if node != nil {
 		tab.add(node)
-		log.Info(fmt.Sprintf("添加一个节点：%v:%v/%v", node.IP, node.TCP, node.UDP))
+		log.Info(fmt.Sprintf("向 NodeDB 中添加节点：%v:%v/%v", node.IP, node.TCP, node.UDP))
 		tab.db.updateFindFails(id, 0)
 	}
 	return node, result
@@ -751,7 +754,7 @@ func (tab *Table) nextRevalidateTime() time.Duration {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 
-	return time.Duration(tab.rand.Int63n(int64(10 * time.Second)))
+	return time.Duration(tab.rand.Int63n(int64(10 * time.Minute)))
 }
 
 type nodesByDistance struct {

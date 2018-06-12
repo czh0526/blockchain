@@ -41,7 +41,7 @@ func (n *Node) Start() error {
 
 	n.serverConfig = p2p.Config{
 		PrivateKey: key,
-		ListenAddr: ":30303",
+		ListenAddr: ":30308",
 	}
 	running := &p2p.Server{Config: n.serverConfig}
 	if err := running.Start(); err != nil {
