@@ -190,6 +190,7 @@ func (tab *Table) loop() {
 	defer revalidate.Stop()
 	defer copyNodes.Stop()
 
+	log.Info("[Discovery]: Table.loop() up, 定期的刷新和校验节点.")
 	go tab.doRefresh(refreshDone)
 
 loop:
@@ -236,18 +237,18 @@ loop:
 
 func (tab *Table) doRefresh(done chan struct{}) {
 	defer close(done)
-	log.Info(fmt.Sprintf("Table.doRefresh() was called at %s", time.Now().Format("2006-01-02 15:04:05")))
+	log.Debug(fmt.Sprintf("Table.doRefresh() was called at %s", time.Now().Format("2006-01-02 15:04:05")))
 
 	tab.loadSeedNodes(true)
 	// 找到三个离自己最近的节点
-	log.Info(fmt.Sprintf("Table.lookup(), find self.ID 0x%x...", tab.self.ID[:4]))
+	log.Debug(fmt.Sprintf("Table.doRefresh() —— find self.ID 0x%x...", tab.self.ID[:4]))
 	tab.lookup(tab.self.ID, false)
 
 	// 通过找不存在的节点，发现全网的节点
 	for i := 0; i < 3; i++ {
 		var target NodeID
 		crand.Read(target[:])
-		log.Info(fmt.Sprintf("Table.lookup(), find rand ID 0x%x...", target[:4]))
+		log.Debug(fmt.Sprintf("Table.doRefresh() —— find rand ID 0x%x...", target[:4]))
 		tab.lookup(target, false)
 	}
 }
@@ -284,6 +285,7 @@ func (tab *Table) lookup(targetID NodeID, refreshIfEmpty bool) []*Node {
 		refreshIfEmpty = false
 	}
 
+	log.Info(fmt.Sprintf("Table.lookup() targetId = %x", targetID[:4]))
 	for {
 		// 按距离Target远近，一次执行 alpha(3)个 findnode + bond, 然后等待执行结果
 		for i := 0; i < len(result.entries) && pendingQueries < alpha; i++ {

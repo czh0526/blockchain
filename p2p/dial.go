@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"container/heap"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
@@ -117,8 +118,8 @@ type dialstate struct {
 	ntab        discoverTable
 
 	lookupRunning bool
-	dialing       map[discover.NodeID]connFlag
 	lookupBuf     []*discover.Node
+	dialing       map[discover.NodeID]connFlag
 	randomNodes   []*discover.Node
 	static        map[discover.NodeID]*dialTask
 	hist          *dialHistory
@@ -135,7 +136,10 @@ func newDialState(static []*discover.Node, bootnodes []*discover.Node, ntab disc
 		bootnodes:   make([]*discover.Node, len(bootnodes)),
 		hist:        new(dialHistory),
 	}
+
+	// 设置 bootnodes
 	copy(s.bootnodes, bootnodes)
+	// 设置 static
 	for _, n := range static {
 		s.addStatic(n)
 	}
@@ -144,6 +148,11 @@ func newDialState(static []*discover.Node, bootnodes []*discover.Node, ntab disc
 
 func (s *dialstate) addStatic(n *discover.Node) {
 	s.static[n.ID] = &dialTask{flags: staticDialedConn, dest: n}
+}
+
+func (s *dialstate) removeStatic(n *discover.Node) {
+	delete(s.static, n.ID)
+	s.hist.remove(n.ID)
 }
 
 func (s *dialstate) taskDone(t task, now time.Time) {
@@ -162,7 +171,9 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 		s.start = now
 	}
 
+	// 核心数据，保存任务集合
 	var newtasks []task
+
 	// 创建和Node相连的拨号任务
 	addDial := func(flag connFlag, n *discover.Node) bool {
 		if err := s.checkDial(n, peers); err != nil {
@@ -191,7 +202,7 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 
 	s.hist.expire(now)
 
-	// 将static中的dialTask放入newtasks
+	// 向 newtasks 中加入全部的 static 节点
 	for id, t := range s.static {
 		err := s.checkDial(t.dest, peers)
 		switch err {
@@ -203,7 +214,7 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 		}
 	}
 
-	// 将bootnodes中的节点加入newtasks
+	// 向 newtasks 中加入一个 bootnode 节点
 	if len(peers) == 0 && len(s.bootnodes) > 0 && needDynDials > 0 && now.Sub(s.start) > fallbackInterval {
 		// shift bootnodes节点
 		bootnode := s.bootnodes[0]
@@ -215,7 +226,7 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 		}
 	}
 
-	// 从discoverTable中选出随机节点进行连接
+	// 从 discoverTable 中选出随机节点， 放入 newtasks
 	randomCandidates := needDynDials / 2
 	if randomCandidates > 0 {
 		n := s.ntab.ReadRandomNodes(s.randomNodes)
@@ -226,7 +237,7 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 		}
 	}
 
-	// 从 lookupBuf 中选出节点进行连接
+	// 从 lookupBuf 中选出节点, 放入 newtasks
 	i := 0
 	for ; i < len(s.lookupBuf) && needDynDials > 0; i++ {
 		if addDial(dynDialedConn, s.lookupBuf[i]) {
@@ -249,8 +260,14 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 	return newtasks
 }
 
+/**
+检查节点n的历史操作状态
+1) 拨号后放弃了
+2) 正在拨号
+3) 已经建立连接
+*/
 func (s *dialstate) checkDial(n *discover.Node, peers map[discover.NodeID]*Peer) error {
-	_, dialing := s.dialing[n.ID] // 检查正在Dialing的队列中，是否存在这个目标节点
+	_, dialing := s.dialing[n.ID]
 	switch {
 	case dialing:
 		return errAlreadyDialing
@@ -264,6 +281,7 @@ func (s *dialstate) checkDial(n *discover.Node, peers map[discover.NodeID]*Peer)
 
 type task interface {
 	Do(*Server)
+	Info() string
 }
 
 type dialTask struct {
@@ -271,6 +289,10 @@ type dialTask struct {
 	dest         *discover.Node
 	lastResolved time.Time
 	resolveDelay time.Duration
+}
+
+func (t *dialTask) Info() string {
+	return fmt.Sprintf("#dialTask: {dest = %v:%v, lastResolved = %s}", t.dest.IP, t.dest.TCP, t.lastResolved.Format("2006-01-02 15:04:05"))
 }
 
 func (t *dialTask) Do(srv *Server) {
@@ -309,12 +331,35 @@ type discoverTask struct {
 	results []*discover.Node
 }
 
+func (t *discoverTask) Info() string {
+	var info string
+	info += "#discoverTask: {"
+	for _, n := range t.results {
+		info += fmt.Sprintf("    %x...@%s:%v, ", n.ID[:4], n.IP, n.TCP)
+	}
+	info += "}"
+	return info
+}
+
 func (t *discoverTask) Do(srv *Server) {
-	fmt.Println("        discoverTask.Do()")
+	next := srv.lastLookup.Add(lookupInterval)
+	if now := time.Now(); now.Before(next) {
+		time.Sleep(next.Sub(now))
+	}
+	srv.lastLookup = time.Now()
+
+	// 构建一个随机的NodeID, 执行 ntab.Lookup()
+	var target discover.NodeID
+	rand.Read(target[:])
+	t.results = srv.ntab.Lookup(target)
 }
 
 type waitExpireTask struct {
 	time.Duration
+}
+
+func (t *waitExpireTask) Info() string {
+	return fmt.Sprintf("#waitExpireTask{ %s }", t.String())
 }
 
 func (t *waitExpireTask) Do(srv *Server) {

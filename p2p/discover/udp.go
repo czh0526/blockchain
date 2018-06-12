@@ -97,7 +97,7 @@ func ListenUDP(c conn, cfg Config) (*Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Info("UDP listener up", "self", tab.self)
+	log.Info(fmt.Sprintf("[UDP]: udp listen at encode://%x...@[%s]:%v", tab.self.ID[:4], tab.self.IP, tab.self.UDP))
 	return tab, nil
 }
 
@@ -158,7 +158,7 @@ func (t *udp) loop() {
 		timeout.Stop()
 	}
 
-	log.Info(fmt.Sprintf("start udp loop() localAddr = %v, realAddr = %v", t.conn.LocalAddr(), t.ourEndpoint))
+	log.Info(fmt.Sprintf("[UDP]: start loop() localAddr = %v, realAddr = %v", t.conn.LocalAddr(), t.ourEndpoint))
 	for {
 		resetTimeout()
 
@@ -226,7 +226,7 @@ func (t *udp) readLoop(unhandled chan<- ReadPacket) {
 		defer close(unhandled)
 	}
 
-	log.Info(fmt.Sprintf("start udp readLoop(), localAddr = %v, realAddr = %v", t.conn.LocalAddr(), t.ourEndpoint))
+	log.Info(fmt.Sprintf("[UDP]: start readLoop(), localAddr = %v, realAddr = %v", t.conn.LocalAddr(), t.ourEndpoint))
 	buf := make([]byte, 1280)
 	for {
 		// 将UDP报文中的数据读入buf

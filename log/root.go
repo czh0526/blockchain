@@ -12,7 +12,9 @@ var (
 
 func init() {
 	//root.SetHandler(DiscardHandler())
-	root.SetHandler(StdoutHandler)
+	glogHandler := NewGlogHandler(StdoutHandler)
+	glogHandler.Verbosity(LvlDebug)
+	root.SetHandler(glogHandler)
 }
 
 // New returns a new logger with the given context.

@@ -66,18 +66,21 @@ type Server struct {
 	newPeerHook  func(*Peer)
 	running      bool
 
-	ntab         discoverTable
-	listener     net.Listener
-	ourHandshake *protoHandshake
+	lastLookup time.Time
+	ntab       discoverTable
 
-	quit          chan struct{}
-	addstatic     chan *discover.Node
-	removestatic  chan *discover.Node
+	listener      net.Listener
+	ourHandshake  *protoHandshake
 	posthandshake chan *conn
-	addpeer       chan *conn
-	delpeer       chan peerDrop
-	loopWG        sync.WaitGroup
-	log           log.Logger
+
+	addstatic    chan *discover.Node
+	removestatic chan *discover.Node
+	addpeer      chan *conn
+	delpeer      chan peerDrop
+
+	loopWG sync.WaitGroup
+	log    log.Logger
+	quit   chan struct{}
 }
 
 type peerDrop struct {
@@ -152,11 +155,15 @@ func (srv *Server) Start() (err error) {
 		Bootnodes: bootnodes,
 		//Unhandled: unhandled,
 	}
+
+	// DiscoveryTable
 	ntab, err := discover.ListenUDP(conn, cfg)
 	if err != nil {
 		return err
 	}
 	srv.ntab = ntab
+
+	dialer := newDialState([]*discover.Node{}, bootnodes, srv.ntab, 5)
 
 	srv.ourHandshake = &protoHandshake{
 		Version: baseProtocolVersion,
@@ -177,9 +184,9 @@ func (srv *Server) Start() (err error) {
 		srv.log.Warn("P2P server will be useless, neither dialing nor listening")
 	}
 
-	// 启动逻辑循环
 	srv.loopWG.Add(1)
-	go srv.run()
+	// 启动拨号循环
+	go srv.run(dialer)
 	srv.running = true
 	return nil
 }
@@ -189,12 +196,13 @@ func (srv *Server) startListening() error {
 	if err != nil {
 		return err
 	}
-	srv.log.Info(fmt.Sprintf("tcp listen at %s", srv.ListenAddr))
 
 	laddr := listener.Addr().(*net.TCPAddr)
 	srv.ListenAddr = laddr.String()
 	srv.listener = listener
 	srv.loopWG.Add(1)
+
+	srv.log.Info(fmt.Sprintf("[TCP]: Server.listenLoop() at %s —— RLPx listener up.", srv.ListenAddr))
 	go srv.listenLoop()
 	if !laddr.IP.IsLoopback() {
 		srv.loopWG.Add(1)
@@ -205,15 +213,48 @@ func (srv *Server) startListening() error {
 	return nil
 }
 
-func (srv *Server) run() {
+type dialer interface {
+	newTasks(running int, peers map[discover.NodeID]*Peer, now time.Time) []task
+	taskDone(task, time.Time)
+	addStatic(*discover.Node)
+	removeStatic(*discover.Node)
+}
+
+func (srv *Server) run(dialstate dialer) {
 	defer srv.loopWG.Done()
 	var (
 		peers        = make(map[discover.NodeID]*Peer)
 		inboundCount = 0
+		taskdone     = make(chan task, maxActiveDialTasks)
+		runningTasks []task
+		queuedTasks  []task
 	)
 
+	startTasks := func(ts []task) (rest []task) {
+		i := 0
+		for ; len(runningTasks) < maxActiveDialTasks && i < len(ts); i++ {
+			t := ts[i]
+			srv.log.Debug(fmt.Sprintf("scheduleTasks(), task = %v.", t.Info()))
+			go func() { t.Do(srv); taskdone <- t }()
+			runningTasks = append(runningTasks, t)
+		}
+		return ts[i:]
+	}
+	scheduleTasks := func() {
+		// 进行一次 queuedTasks ==> runningTasks 的任务调度
+		queuedTasks = append(queuedTasks[:0], startTasks(queuedTasks)...)
+		if len(runningTasks) < maxActiveDialTasks {
+			// runningTasks 没有放满，创建新任务，放入 runningTasks queuedTasks 中
+			nt := dialstate.newTasks(len(runningTasks)+len(queuedTasks), peers, time.Now())
+			queuedTasks = append(queuedTasks, startTasks(nt)...)
+		}
+	}
+
+	log.Info(fmt.Sprintf("[Dial]: Server.run() up —— 监听并控制 RLPx 连接建立."))
 running:
 	for {
+		scheduleTasks()
+
 		select {
 		case <-srv.quit:
 			break running
@@ -303,7 +344,6 @@ type tempError interface {
 
 func (srv *Server) listenLoop() {
 	defer srv.loopWG.Done()
-	srv.log.Info("RLPx listener up")
 
 	tokens := defaultMaxPendingPeers
 	if srv.MaxPendingPeers > 0 {
@@ -316,7 +356,7 @@ func (srv *Server) listenLoop() {
 
 	for {
 		<-slots
-		srv.log.Info("pending queue decrease 1")
+		srv.log.Trace("pending queue decrease 1")
 
 		var (
 			fd  net.Conn
