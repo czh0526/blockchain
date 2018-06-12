@@ -140,7 +140,7 @@ func (srv *Server) Start() (err error) {
 
 	// bootnodes
 	bootnodes := make([]*discover.Node, 0, 1)
-	if node, err := discover.ParseNode("enode://0f231b57ffe1a1b69dcd5e6fbed3ea4bc2e903eae6e6295aca2abf92e264652945219403ecdb99a8523c485e6dfd05f1124d332feb89397820843ee7ed2b3a1f@139.199.100.150:30303"); err == nil {
+	if node, err := discover.ParseNode("enode://0f231b57ffe1a1b69dcd5e6fbed3ea4bc2e903eae6e6295aca2abf92e264652945219403ecdb99a8523c485e6dfd05f1124d332feb89397820843ee7ed2b3a1f@139.199.100.150:30308"); err == nil {
 		bootnodes = append(bootnodes, node)
 	}
 
