@@ -145,13 +145,13 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 		reason     DiscReason
 	)
 	p.wg.Add(2)
-	p.log.Trace("启动 readLoop 循环")
+	p.log.Info("启动 readLoop 循环")
 	go p.readLoop(readErr)
-	p.log.Trace("启动 pingLoop 循环")
+	p.log.Info("启动 pingLoop 循环")
 	go p.pingLoop()
 
 	writeStart <- struct{}{}
-	p.log.Trace("启动 Protocol 处理")
+	p.log.Info("启动 Protocol 处理")
 	p.startProtocols(writeStart, writeErr)
 
 loop:

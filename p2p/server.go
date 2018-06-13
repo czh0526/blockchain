@@ -243,7 +243,10 @@ func (srv *Server) run(dialstate dialer) {
 		for ; len(runningTasks) < maxActiveDialTasks && i < len(ts); i++ {
 			t := ts[i]
 			srv.log.Debug(fmt.Sprintf("scheduleTasks(), task = %s.", t))
-			go func() { t.Do(srv); taskdone <- t }()
+			go func() {
+				t.Do(srv)
+				taskdone <- t
+			}()
 			runningTasks = append(runningTasks, t)
 		}
 		return ts[i:]
@@ -259,6 +262,7 @@ func (srv *Server) run(dialstate dialer) {
 	}
 
 	log.Info(fmt.Sprintf("[Dial]: Server.run() up —— 监听并控制 RLPx 连接建立."))
+
 running:
 	for {
 		scheduleTasks()
@@ -298,6 +302,7 @@ running:
 				p := newPeer(c, srv.Protocols)
 				srv.log.Info("Adding p2p peer", "name", c.name, "addr", c.fd.RemoteAddr())
 				go srv.runPeer(p)
+				peers[c.id] = p
 			}
 			select {
 			case c.cont <- err:
@@ -309,6 +314,7 @@ running:
 }
 
 func (srv *Server) runPeer(p *Peer) {
+	log.Info(fmt.Sprintf("runPeer() startup."))
 	if srv.newPeerHook != nil {
 		srv.newPeerHook(p)
 	}
