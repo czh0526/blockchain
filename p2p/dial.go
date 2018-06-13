@@ -133,6 +133,7 @@ func newDialState(static []*discover.Node, bootnodes []*discover.Node, ntab disc
 		ntab:        ntab,
 		static:      make(map[discover.NodeID]*dialTask),
 		dialing:     make(map[discover.NodeID]connFlag),
+		randomNodes: make([]*discover.Node, maxdyn/2),
 		bootnodes:   make([]*discover.Node, len(bootnodes)),
 		hist:        new(dialHistory),
 	}
@@ -180,7 +181,7 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 			log.Trace("Skipping dial candidate", "id", n.ID, "addr", &net.TCPAddr{IP: n.IP, Port: int(n.TCP)}, "err", err)
 			return false
 		}
-		log.Trace(fmt.Sprintf("添加dialTask() ==> 0x%x", n.ID.Bytes()))
+		log.Debug(fmt.Sprintf("添加dialTask ==> 0x%x", n.ID.Bytes()))
 		s.dialing[n.ID] = flag
 		newtasks = append(newtasks, &dialTask{flags: flag, dest: n})
 		return true
@@ -281,7 +282,6 @@ func (s *dialstate) checkDial(n *discover.Node, peers map[discover.NodeID]*Peer)
 
 type task interface {
 	Do(*Server)
-	Info() string
 }
 
 type dialTask struct {
@@ -291,7 +291,7 @@ type dialTask struct {
 	resolveDelay time.Duration
 }
 
-func (t *dialTask) Info() string {
+func (t *dialTask) String() string {
 	return fmt.Sprintf("#dialTask: {dest = %v:%v, lastResolved = %s}", t.dest.IP, t.dest.TCP, t.lastResolved.Format("2006-01-02 15:04:05"))
 }
 
@@ -304,7 +304,7 @@ func (t *dialTask) Do(srv *Server) {
 
 	err := t.dial(srv, t.dest)
 	if err != nil {
-		log.Trace("Dial error", "task", t, "err", err)
+		log.Debug("Dial error", "task", t, "err", err)
 		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
 			if t.resolve(srv) {
 				t.dial(srv, t.dest)
@@ -323,15 +323,19 @@ type dialError struct {
 }
 
 func (t *dialTask) dial(srv *Server, dest *discover.Node) error {
-	fmt.Println("dialTask.dial() has not be implemented. ")
-	return errors.New("func has not be implemented.")
+	fd, err := srv.Dialer.Dial(dest)
+	if err != nil {
+		return &dialError{err}
+	}
+
+	return srv.SetupConn(fd, t.flags, dest)
 }
 
 type discoverTask struct {
 	results []*discover.Node
 }
 
-func (t *discoverTask) Info() string {
+func (t *discoverTask) String() string {
 	var info string
 	info += "#discoverTask: {"
 	for _, n := range t.results {
@@ -358,7 +362,7 @@ type waitExpireTask struct {
 	time.Duration
 }
 
-func (t *waitExpireTask) Info() string {
+func (t *waitExpireTask) String() string {
 	return fmt.Sprintf("#waitExpireTask{ %s }", t.String())
 }
 

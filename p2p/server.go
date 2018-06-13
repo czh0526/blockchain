@@ -230,11 +230,19 @@ func (srv *Server) run(dialstate dialer) {
 		queuedTasks  []task
 	)
 
+	delTask := func(t task) {
+		for i := range runningTasks {
+			if runningTasks[i] == t {
+				runningTasks = append(runningTasks[:i], runningTasks[i+1:]...)
+				break
+			}
+		}
+	}
 	startTasks := func(ts []task) (rest []task) {
 		i := 0
 		for ; len(runningTasks) < maxActiveDialTasks && i < len(ts); i++ {
 			t := ts[i]
-			srv.log.Debug(fmt.Sprintf("scheduleTasks(), task = %v.", t.Info()))
+			srv.log.Debug(fmt.Sprintf("scheduleTasks(), task = %s.", t))
 			go func() { t.Do(srv); taskdone <- t }()
 			runningTasks = append(runningTasks, t)
 		}
@@ -271,6 +279,11 @@ running:
 					return
 				}
 			}()
+		case <-srv.removestatic:
+		case t := <-taskdone:
+			srv.log.Debug(fmt.Sprintf("task done task = %s", t))
+			dialstate.taskDone(t, time.Now())
+			delTask(t)
 		case c := <-srv.posthandshake:
 			srv.log.Info(fmt.Sprintf("    --- server get 'posthandshake' 0x%x...", c.id.Bytes()[:4]))
 			select {
