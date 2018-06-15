@@ -592,7 +592,7 @@ func (tab *Table) bond(pinged bool, id NodeID, addr *net.UDPAddr, tcpPort uint16
 
 	if node != nil {
 		tab.add(node)
-		log.Info(fmt.Sprintf("向 NodeDB 中添加节点：%v:%v/%v", node.IP, node.TCP, node.UDP))
+		log.Info(fmt.Sprintf("：%v:%v/%v", node.IP, node.TCP, node.UDP))
 		tab.db.updateFindFails(id, 0)
 	}
 	return node, result

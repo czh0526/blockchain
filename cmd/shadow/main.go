@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/czh0526/blockchain/internal/debug"
 	"github.com/czh0526/blockchain/log"
 	"github.com/czh0526/blockchain/node"
 	"gopkg.in/urfave/cli.v1"
@@ -19,6 +20,14 @@ var (
 
 func init() {
 	app.Action = shadow
+	app.Flags = append(app.Flags, debug.Flags...)
+
+	app.Before = func(ctx *cli.Context) error {
+		if err := debug.Setup(ctx); err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 func main() {

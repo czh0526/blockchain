@@ -195,7 +195,7 @@ func (p *Peer) pingLoop() {
 	for {
 		select {
 		case <-ping.C:
-			log.Debug(fmt.Sprintf("[RLPx]: pingMsg ==> %v", p.rw.fd.RemoteAddr()))
+			p.log.Debug(fmt.Sprintf("[RLPx]: pingMsg ==> %v", p.rw.fd.RemoteAddr()))
 			if err := SendItems(p.rw, pingMsg); err != nil {
 				p.protoErr <- err
 				return

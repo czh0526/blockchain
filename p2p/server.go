@@ -451,6 +451,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *discover.Node) e
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		srv.log.Trace("Failed proto handshake", "err", err)
+		return err
 	}
 	if phs.ID != c.id {
 		return DiscUnexpectedIdentity
