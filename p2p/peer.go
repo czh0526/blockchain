@@ -195,6 +195,7 @@ func (p *Peer) pingLoop() {
 	for {
 		select {
 		case <-ping.C:
+			log.Debug(fmt.Sprintf("[RLPx]: pingMsg ==> %v", p.rw.fd.RemoteAddr()))
 			if err := SendItems(p.rw, pingMsg); err != nil {
 				p.protoErr <- err
 				return
@@ -226,9 +227,11 @@ func (p *Peer) readLoop(errc chan<- error) {
 func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
+		p.log.Debug(fmt.Sprintf("[RLPx]: pingMsg <== %v", p.rw.fd.RemoteAddr()))
 		msg.Discard()
 		go SendItems(p.rw, pongMsg)
 	case msg.Code == discMsg:
+		p.log.Debug(fmt.Sprintf("[RLPx]: discMsg <== %v", p.rw.fd.RemoteAddr()))
 		var reason [1]DiscReason
 		rlp.Decode(msg.Payload, &reason)
 		return reason[0]
@@ -239,6 +242,7 @@ func (p *Peer) handle(msg Msg) error {
 		if err != nil {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
+		p.log.Debug(fmt.Sprintf("[RLPx]: %v <== 0x%x <== %v", proto.Name, msg.Code, p.rw.fd.RemoteAddr()))
 		select {
 		case proto.in <- msg:
 			return nil
