@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/czh0526/blockchain/p2p"
+	"github.com/czh0526/blockchain/p2p/discover"
 	"github.com/czh0526/blockchain/rpc"
 )
 
@@ -26,7 +27,7 @@ func New() (*Shadow, error) {
 				Network: 333,
 			}
 		},
-		PeerInfo: func(id discover.NodeInfo) interface{} {
+		PeerInfo: func(id discover.NodeID) interface{} {
 			return nil
 		},
 	}
