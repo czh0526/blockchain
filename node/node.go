@@ -109,6 +109,11 @@ func (n *Node) Start() error {
 		services[kind] = service
 	}
 
+	// 设置 p2p.Server Protocols
+	for _, service := range services {
+		running.Protocols = append(running.Protocols, service.Protocols()...)
+	}
+
 	// 启动 p2p.Server
 	log.Info("[Node]: start p2p server ... ")
 	if err := running.Start(); err != nil {
