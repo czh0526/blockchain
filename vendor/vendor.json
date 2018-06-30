@@ -3,6 +3,11 @@
 	"ignore": "test",
 	"package": [
 		{
+			"path": "27c40922c40b43fe04554d8223a402af3ea333f3",
+			"revision": "gopkg.in/fatih/set.v0",
+			"version": "gopkg.in/fatih/set.v0"
+		},
+		{
 			"checksumSHA1": "pWw3xLiP73NGFM6Tgbz+xznjHKE=",
 			"path": "github.com/aristanetworks/goarista/monotime",
 			"revision": "ea17b1a17847fb6e4c0a91de0b674704693469b0",
@@ -25,6 +30,18 @@
 			"path": "github.com/golang/snappy",
 			"revision": "2e65f85255dbc3072edf28d6b5b8efc472979f5a",
 			"revisionTime": "2018-05-18T05:39:59Z"
+		},
+		{
+			"checksumSHA1": "OpqXzG/TsirRRiSxa+hCSOfaQ0k=",
+			"path": "github.com/rs/cors",
+			"revision": "a62a804a8a009876ca59105f7899938a1349f4b3",
+			"revisionTime": "2016-06-17T23:19:35Z"
+		},
+		{
+			"checksumSHA1": "c4NinZs0gcDUkXx375li6epE8K0=",
+			"path": "github.com/rs/xhandler",
+			"revision": "ed27b6fd65218132ee50cd95f38474a3d8a2cd12",
+			"revisionTime": "2016-06-18T19:32:21Z"
 		},
 		{
 			"checksumSHA1": "XjFmNGbjc2CrZkRN51s4ssCxC6c=",
@@ -97,6 +114,22 @@
 			"path": "github.com/syndtr/goleveldb/leveldb/util",
 			"revision": "e2150783cd35f5b607daca48afd8c57ec54cc995",
 			"revisionTime": "2018-06-09T01:09:29Z"
+		},
+		{
+			"path": "golang.org/x/net/context",
+			"revision": ""
+		},
+		{
+			"checksumSHA1": "GawkAYw670ZS+f0D17MYNps41QA=",
+			"path": "gopkg.in/fatih/set.v0",
+			"revision": "27c40922c40b43fe04554d8223a402af3ea333f3",
+			"revisionTime": "2014-12-10T08:48:24Z"
+		},
+		{
+			"checksumSHA1": "2qFBBtdJlljXG9S1E03OiRf/gsM=",
+			"path": "gopkg.in/natefinch/npipe.v2",
+			"revision": "c1b8fa8bdccecb0b8db834ee0b92fdbcfa606dd6",
+			"revisionTime": "2016-06-21T03:49:01Z"
 		},
 		{
 			"checksumSHA1": "uja6BKCN3ngSeXQE7te2vq4bKro=",

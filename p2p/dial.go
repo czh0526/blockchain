@@ -178,10 +178,10 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 	// 创建和Node相连的拨号任务
 	addDial := func(flag connFlag, n *discover.Node) bool {
 		if err := s.checkDial(n, peers); err != nil {
-			log.Trace("Skipping dial candidate", "id", n.ID, "addr", &net.TCPAddr{IP: n.IP, Port: int(n.TCP)}, "err", err)
+			log.Trace(fmt.Sprintf("[Dial]: newtasks() --- 跳过拨号: ==> 0x%x...@%v, err = %v ", n.ID[:4], &net.TCPAddr{IP: n.IP, Port: int(n.TCP)}, err))
 			return false
 		}
-		log.Debug(fmt.Sprintf("添加dialTask ==> 0x%x", n.ID.Bytes()))
+		log.Debug(fmt.Sprintf("[Dial]: newtasks() --- 添加dialTask ==> 0x%x...@%v:%v", n.ID.Bytes()[:4], n.IP, n.TCP))
 		s.dialing[n.ID] = flag
 		newtasks = append(newtasks, &dialTask{flags: flag, dest: n})
 		return true
@@ -251,11 +251,13 @@ func (s *dialstate) newTasks(nRunning int, peers map[discover.NodeID]*Peer, now 
 	if len(s.lookupBuf) < needDynDials && !s.lookupRunning {
 		s.lookupRunning = true
 		newtasks = append(newtasks, &discoverTask{})
+		log.Debug(fmt.Sprintf("[Dial]: newtasks() --- lookupBuf 中节点数量不够，添加 discoverTask{}, needDynDials = %v", needDynDials))
 	}
 
 	if nRunning == 0 && len(newtasks) == 0 && s.hist.Len() > 0 {
 		t := &waitExpireTask{s.hist.min().exp.Sub(now)}
 		newtasks = append(newtasks, t)
+		log.Debug(fmt.Sprintf("[Dial]: newtasks() --- 添加 waitExpirationTask{%s}.", t.Duration))
 	}
 
 	return newtasks
@@ -292,7 +294,7 @@ type dialTask struct {
 }
 
 func (t *dialTask) String() string {
-	return fmt.Sprintf("#dialTask: {dest = %v:%v, lastResolved = %s}", t.dest.IP, t.dest.TCP, t.lastResolved.Format("2006-01-02 15:04:05"))
+	return fmt.Sprintf("#dialTask: {dest = %v:%v}", t.dest.IP, t.dest.TCP)
 }
 
 func (t *dialTask) Do(srv *Server) {
@@ -304,7 +306,7 @@ func (t *dialTask) Do(srv *Server) {
 
 	err := t.dial(srv, t.dest)
 	if err != nil {
-		log.Debug("Dial error", "task", t, "err", err)
+		log.Debug(fmt.Sprintf("Dial error, task = %v, err = %v", t, err))
 		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
 			if t.resolve(srv) {
 				t.dial(srv, t.dest)
@@ -339,7 +341,7 @@ func (t *discoverTask) String() string {
 	var info string
 	info += "#discoverTask: {"
 	for _, n := range t.results {
-		info += fmt.Sprintf("    %x...@%s:%v, ", n.ID[:4], n.IP, n.TCP)
+		info += fmt.Sprintf("    0x%x...@%s:%v, ", n.ID[:4], n.IP, n.TCP)
 	}
 	info += "}"
 	return info

@@ -190,7 +190,7 @@ func (tab *Table) loop() {
 	defer revalidate.Stop()
 	defer copyNodes.Stop()
 
-	log.Info("[Discovery]: Table.loop() up, 定期的刷新和校验节点.")
+	log.Info("[Discv4]: Table.loop() up, 定期的刷新和校验节点.")
 	go tab.doRefresh(refreshDone)
 
 loop:
@@ -237,11 +237,11 @@ loop:
 
 func (tab *Table) doRefresh(done chan struct{}) {
 	defer close(done)
-	log.Debug(fmt.Sprintf("Table.doRefresh() was called at %s", time.Now().Format("2006-01-02 15:04:05")))
+	log.Debug(fmt.Sprintf("[Discv4]: Table.doRefresh() was called at %s", time.Now().Format("2006-01-02 15:04:05")))
 
 	tab.loadSeedNodes(true)
 	// 找到三个离自己最近的节点
-	log.Debug(fmt.Sprintf("Table.doRefresh() —— find self.ID 0x%x...", tab.self.ID[:4]))
+	log.Debug(fmt.Sprintf("[Discv4]: Table.doRefresh() —— find self.ID 0x%x...", tab.self.ID[:4]))
 	tab.lookup(tab.self.ID, false)
 
 	// 通过找不存在的节点，发现全网的节点
@@ -592,7 +592,7 @@ func (tab *Table) bond(pinged bool, id NodeID, addr *net.UDPAddr, tcpPort uint16
 
 	if node != nil {
 		tab.add(node)
-		log.Info(fmt.Sprintf("：%v:%v/%v", node.IP, node.TCP, node.UDP))
+		log.Debug(fmt.Sprintf("向 NodeDB 添加节点：==> %v:%v/%v", node.IP, node.TCP, node.UDP))
 		tab.db.updateFindFails(id, 0)
 	}
 	return node, result
@@ -630,8 +630,9 @@ func (tab *Table) add(new *Node) {
 	defer tab.mutex.Unlock()
 
 	b := tab.bucket(new.sha)
+	// 执行"添加"操作
 	if !tab.bumpOrAdd(b, new) {
-		// 如果因为数量已满， 将新节点放入replacement队列
+		// 如果因为数量已满， 执行"替换"操作
 		tab.addReplacement(b, new)
 	}
 }
@@ -656,6 +657,8 @@ func (tab *Table) bucket(sha common.Hash) *bucket {
 	return tab.buckets[d-bucketMinDistance-1]
 }
 
+// 已存在：更新时间戳
+// 不存在：增加
 func (tab *Table) bumpOrAdd(b *bucket, n *Node) bool {
 	// 如果n在列表中，变为最活跃的节点
 	if b.bump(n) {

@@ -202,7 +202,7 @@ func (srv *Server) startListening() error {
 	srv.listener = listener
 	srv.loopWG.Add(1)
 
-	srv.log.Info(fmt.Sprintf("[TCP]: Server.listenLoop() at %s —— RLPx listener up.", srv.ListenAddr))
+	srv.log.Info(fmt.Sprintf("[Srv]: listenLoop() at %s —— RLPx listener up.", srv.ListenAddr))
 	go srv.listenLoop()
 	if !laddr.IP.IsLoopback() {
 		srv.loopWG.Add(1)
@@ -242,7 +242,7 @@ func (srv *Server) run(dialstate dialer) {
 		i := 0
 		for ; len(runningTasks) < maxActiveDialTasks && i < len(ts); i++ {
 			t := ts[i]
-			srv.log.Debug(fmt.Sprintf("scheduleTasks(), task = %s.", t))
+			srv.log.Debug(fmt.Sprintf("[Srv]: startTasks(), task = %s.", t))
 			go func() {
 				t.Do(srv)
 				taskdone <- t
@@ -254,6 +254,7 @@ func (srv *Server) run(dialstate dialer) {
 	scheduleTasks := func() {
 		// 进行一次 queuedTasks ==> runningTasks 的任务调度
 		queuedTasks = append(queuedTasks[:0], startTasks(queuedTasks)...)
+		srv.log.Debug(fmt.Sprintf("[Srv]: runningTasks = %v, maxActiveDialTasks = %v", len(runningTasks), maxActiveDialTasks))
 		if len(runningTasks) < maxActiveDialTasks {
 			// runningTasks 没有放满，创建新任务，放入 runningTasks queuedTasks 中
 			nt := dialstate.newTasks(len(runningTasks)+len(queuedTasks), peers, time.Now())
@@ -261,7 +262,7 @@ func (srv *Server) run(dialstate dialer) {
 		}
 	}
 
-	log.Info(fmt.Sprintf("[Dial]: Server.run() up —— 监听并控制 RLPx 连接建立."))
+	log.Info(fmt.Sprintf("[Srv]: run() loop up —— 监听并控制 RLPx 连接建立."))
 
 running:
 	for {
@@ -271,36 +272,37 @@ running:
 		case <-srv.quit:
 			break running
 		case n := <-srv.addstatic:
-			fmt.Printf("    ---- receive 'addstatic', n = 0x%x \n", n.ID.Bytes()[:4])
+			log.Debug(fmt.Sprintf("[Srv]: run() loop  ---- signal 'addstatic', n = 0x%x \n", n.ID.Bytes()[:4]))
 			go func() {
 				fd, err := srv.Dialer.Dial(n)
 				if err != nil {
-					fmt.Printf("srv dial %v error: %v \n", n.String(), err)
+					log.Error(fmt.Sprintf("[Srv]: run() loop --- srv dial %v error: %v \n", n.String(), err))
 					return
 				}
 				if err = srv.SetupConn(fd, staticDialedConn, n); err != nil {
-					fmt.Printf("srv SetupConn error: %v \n", err)
+					log.Error(fmt.Sprintf("[Srv]: srv SetupConn error: %v \n", err))
 					return
 				}
 			}()
-		case <-srv.removestatic:
+		case n := <-srv.removestatic:
+			log.Debug(fmt.Sprintf("[Srv]: run() loop  ---- signal 'removestatic', n = 0x%x \n", n.ID.Bytes()[:4]))
 		case t := <-taskdone:
-			srv.log.Debug(fmt.Sprintf("task done task = %s", t))
+			srv.log.Debug(fmt.Sprintf("[Srv]: run() loop  --- signal 'taskdone', task = %s", t))
 			dialstate.taskDone(t, time.Now())
 			delTask(t)
 		case c := <-srv.posthandshake:
-			srv.log.Info(fmt.Sprintf("    --- server get 'posthandshake' 0x%x...", c.id.Bytes()[:4]))
+			srv.log.Debug(fmt.Sprintf("[Srv]: run() loop  --- signal 'posthandshake', 0x%x...", c.id.Bytes()[:4]))
 			select {
 			case c.cont <- srv.encHandshakeChecks(peers, inboundCount, c):
 			case <-srv.quit:
 				break running
 			}
 		case c := <-srv.addpeer:
-			srv.log.Info(fmt.Sprintf("    --- server get 'addpeer' 0x%x...", c.id.Bytes()[:4]))
+			srv.log.Debug(fmt.Sprintf("[Srv]: run() loop  --- signal 'addpeer' 0x%x...", c.id.Bytes()[:4]))
 			err := srv.protoHandshakeChecks(peers, inboundCount, c)
 			if err == nil {
 				p := newPeer(c, srv.Protocols)
-				srv.log.Info("Adding p2p peer", "name", c.name, "addr", c.fd.RemoteAddr())
+				srv.log.Debug("Adding p2p peer", "name", c.name, "addr", c.fd.RemoteAddr())
 				go srv.runPeer(p)
 				peers[c.id] = p
 			}
@@ -314,7 +316,7 @@ running:
 }
 
 func (srv *Server) runPeer(p *Peer) {
-	log.Info(fmt.Sprintf("runPeer() startup."))
+	log.Info(fmt.Sprintf("[Srv]: runPeer() ==> 0x%x...@%v", p.ID().Bytes()[:4], p.rw.fd.RemoteAddr()))
 	if srv.newPeerHook != nil {
 		srv.newPeerHook(p)
 	}
@@ -414,7 +416,7 @@ func (srv *Server) Stop() {
 }
 
 func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *discover.Node) error {
-	srv.log.Info(fmt.Sprintf("Server SetupConn: fd = %v", fd))
+	srv.log.Info(fmt.Sprintf("[Srv]: SetupConn:  ==> %v", fd.RemoteAddr()))
 
 	c := &conn{fd: fd, transport: srv.newTransport(fd), flags: flags, cont: make(chan error)}
 	err := srv.setupConn(c, flags, dialDest)
@@ -435,10 +437,10 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *discover.Node) e
 
 	// RLPx handshake
 	if c.id, err = c.doEncHandshake(srv.PrivateKey, dialDest); err != nil {
-		srv.log.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
+		srv.log.Trace("[Srv]: setupConn() --- Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
-	srv.log.Info(fmt.Sprintf("RLPx handshake done. id = 0x%x...", c.id.Bytes()[:4]))
+	srv.log.Info(fmt.Sprintf("[Srv]: setupConn() --- RLPx handshake done. id = 0x%x...", c.id.Bytes()[:4]))
 	if dialDest != nil && c.id != dialDest.ID {
 		return DiscUnexpectedIdentity
 	}
@@ -450,13 +452,13 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *discover.Node) e
 	// proto handshake
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
-		srv.log.Trace("Failed proto handshake", "err", err)
+		srv.log.Trace("[Srv]: Failed proto handshake", "err", err)
 		return err
 	}
 	if phs.ID != c.id {
 		return DiscUnexpectedIdentity
 	}
-	srv.log.Info(fmt.Sprintf("proto handshake done. phs = 0x%x...", phs.ID.Bytes()[:4]))
+	srv.log.Info(fmt.Sprintf("[Srv]: proto handshake done. phs = 0x%x...", phs.ID.Bytes()[:4]))
 
 	c.caps, c.name = phs.Caps, phs.Name
 	err = srv.checkpoint(c, srv.addpeer)
@@ -493,4 +495,17 @@ func (srv *Server) AddPeer(node *discover.Node) {
 type sharedUDPConn struct {
 	*net.UDPConn
 	unhandled chan discover.ReadPacket
+}
+
+type NodeInfo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Enode string `json:"enode"`
+	IP    string `json:"ip"`
+	Ports struct {
+		Discovery int `json:"discovery"`
+		Listener  int `json:"listener"`
+	} `json:"ports"`
+	ListenAddr string                 `json:"listenAddr"`
+	Protocols  map[string]interface{} `json:"protocols"`
 }

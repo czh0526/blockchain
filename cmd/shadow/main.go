@@ -7,6 +7,7 @@ import (
 	"github.com/czh0526/blockchain/internal/debug"
 	"github.com/czh0526/blockchain/log"
 	"github.com/czh0526/blockchain/node"
+	"github.com/czh0526/blockchain/shadow"
 	"gopkg.in/urfave/cli.v1"
 )
 
@@ -19,7 +20,7 @@ var (
 )
 
 func init() {
-	app.Action = shadow
+	app.Action = startShadow
 	app.Flags = append(app.Flags, debug.Flags...)
 
 	app.Before = func(ctx *cli.Context) error {
@@ -37,15 +38,31 @@ func main() {
 	}
 }
 
-func shadow(ctx *cli.Context) error {
-	node, err := node.New()
+func startShadow(ctx *cli.Context) error {
+	node, err := makeFullNode(ctx)
 	if err != nil {
+		log.Error(fmt.Sprintf("[Node]: make full node error: %v", err))
 		return err
 	}
 
 	startNode(ctx, node)
+
 	node.Wait()
+
 	return nil
+}
+
+func makeFullNode(ctx *cli.Context) (*node.Node, error) {
+	stack, err := node.New()
+	if err != nil {
+		return nil, err
+	}
+
+	stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
+		return shadow.New()
+	})
+
+	return stack, nil
 }
 
 func startNode(ctx *cli.Context, node *node.Node) {

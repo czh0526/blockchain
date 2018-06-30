@@ -23,6 +23,7 @@ import (
 	"github.com/czh0526/blockchain/crypto/ecies"
 	"github.com/czh0526/blockchain/crypto/secp256k1"
 	"github.com/czh0526/blockchain/crypto/sha3"
+	"github.com/czh0526/blockchain/log"
 	"github.com/czh0526/blockchain/p2p/discover"
 	"github.com/czh0526/blockchain/rlp"
 	"github.com/golang/snappy"
@@ -336,7 +337,7 @@ func (h *encHandshake) secrets(auth, authResp []byte) (secrets, error) {
 	if err != nil {
 		return secrets{}, err
 	}
-	fmt.Printf("h.initiator = %v, ecdhtSecret = 0x%x \n", h.initiator, ecdheSecret)
+	log.Debug(fmt.Sprintf("[RLPx]: h.initiator = %v, ecdhtSecret = 0x%x.", h.initiator, ecdheSecret))
 
 	sharedSecret := crypto.Keccak256(ecdheSecret, crypto.Keccak256(h.respNonce, h.initNonce))
 	aesSecret := crypto.Keccak256(ecdheSecret, sharedSecret)

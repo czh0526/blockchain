@@ -120,7 +120,7 @@ func newPeer(conn *conn, protocols []Protocol) *Peer {
 		disc:     make(chan DiscReason),
 		protoErr: make(chan error, len(protomap)+1),
 		closed:   make(chan struct{}),
-		log:      log.New("id", conn.id, "conn", conn.flags),
+		log:      log.New("id", fmt.Sprintf("0x%x...", conn.id.Bytes()[:4]), "conn", conn.flags),
 	}
 	return p
 }
@@ -145,13 +145,13 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 		reason     DiscReason
 	)
 	p.wg.Add(2)
-	p.log.Info("启动 readLoop 循环")
+	p.log.Info("[Peer]: 启动 readLoop 循环")
 	go p.readLoop(readErr)
-	p.log.Info("启动 pingLoop 循环")
+	p.log.Info("[Peer]: 启动 pingLoop 循环")
 	go p.pingLoop()
 
 	writeStart <- struct{}{}
-	p.log.Info("启动 Protocol 处理")
+	p.log.Info("[Peer]: 启动 Protocol 处理")
 	p.startProtocols(writeStart, writeErr)
 
 loop:
@@ -195,7 +195,7 @@ func (p *Peer) pingLoop() {
 	for {
 		select {
 		case <-ping.C:
-			p.log.Debug(fmt.Sprintf("[RLPx]: pingMsg ==> %v", p.rw.fd.RemoteAddr()))
+			p.log.Debug(fmt.Sprintf("[Peer]: pingMsg ==> %v", p.rw.fd.RemoteAddr()))
 			if err := SendItems(p.rw, pingMsg); err != nil {
 				p.protoErr <- err
 				return
@@ -227,11 +227,11 @@ func (p *Peer) readLoop(errc chan<- error) {
 func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
-		p.log.Debug(fmt.Sprintf("[RLPx]: pingMsg <== %v", p.rw.fd.RemoteAddr()))
+		p.log.Debug(fmt.Sprintf("[Peer]: pingMsg <== %v", p.rw.fd.RemoteAddr()))
 		msg.Discard()
 		go SendItems(p.rw, pongMsg)
 	case msg.Code == discMsg:
-		p.log.Debug(fmt.Sprintf("[RLPx]: discMsg <== %v", p.rw.fd.RemoteAddr()))
+		p.log.Debug(fmt.Sprintf("[Peer]: discMsg <== %v", p.rw.fd.RemoteAddr()))
 		var reason [1]DiscReason
 		rlp.Decode(msg.Payload, &reason)
 		return reason[0]
