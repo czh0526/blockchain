@@ -121,7 +121,13 @@ func (s *Shadow) Protocols() []p2p.Protocol {
 }
 
 func (s *Shadow) Start(server *p2p.Server) error {
-	return nil
+	log.Debug("[Shadow]: Start() was called...")
+	for {
+		select {
+		case peer := <-s.newPeerCh:
+			log.Debug(fmt.Sprintf("[Shadow]: new peer ==> %v", peer.id))
+		}
+	}
 }
 
 func (s *Shadow) Stop() error {
