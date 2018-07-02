@@ -59,7 +59,7 @@ func makeFullNode(ctx *cli.Context) (*node.Node, error) {
 	}
 
 	stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		return shadow.New()
+		return shadow.New(0x01)
 	})
 
 	return stack, nil
