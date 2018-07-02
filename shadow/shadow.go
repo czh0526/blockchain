@@ -26,6 +26,7 @@ func New(networkId uint64) (*Shadow, error) {
 	shadow := &Shadow{
 		networkId: networkId,
 		protocols: []p2p.Protocol{},
+		newPeerCh: make(chan *peer),
 	}
 	for _, version := range ProtocolVersions {
 		version := version
