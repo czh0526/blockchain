@@ -53,7 +53,7 @@ func (h *hasher) hash(n node, db *Database, force bool) (node, node, error) {
 	if err != nil {
 		return hashNode{}, n, err
 	}
-	// 存储,计算 hash
+	// 将压缩节点写入 TrieDB
 	hashed, err := h.store(collapsed, db, force)
 	if err != nil {
 		return hashNode{}, n, err

@@ -31,8 +31,13 @@ func (j *journal) append(entry journalEntry) {
 	}
 }
 
+func (j *journal) length() int {
+	return len(j.entries)
+}
+
 func (j *journal) revert(statedb *StateDB, snapshot int) {
 	for i := len(j.entries) - 1; i >= snapshot; i-- {
+		// 执行"动作撤销"操作
 		j.entries[i].revert(statedb)
 
 		if addr := j.entries[i].dirtied(); addr != nil {
@@ -66,6 +71,10 @@ type (
 	storageChange struct {
 		account       *common.Address
 		key, prevalue common.Hash
+	}
+	codeChange struct {
+		account            *common.Address
+		prevcode, prevhash []byte
 	}
 	touchChange struct {
 		account   *common.Address
@@ -111,6 +120,14 @@ func (ch storageChange) revert(s *StateDB) {
 
 func (ch storageChange) dirtied() *common.Address {
 	return ch.account
+}
+
+func (ch codeChange) dirtied() *common.Address {
+	return ch.account
+}
+
+func (ch codeChange) revert(s *StateDB) {
+	s.getStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
 }
 
 func (ch balanceChange) revert(s *StateDB) {

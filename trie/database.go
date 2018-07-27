@@ -12,6 +12,11 @@ var secureKeyPrefix = []byte("secure-key-")
 
 const secureKeyLength = 11 + 32
 
+type DatabaseReader interface {
+	Get(key []byte) (value []byte, err error)
+	Has(key []byte) (bool, error)
+}
+
 type Database struct {
 	diskdb ethdb.Database
 
@@ -173,7 +178,7 @@ func (db *Database) commit(hash common.Hash, batch ethdb.Batch) error {
 		}
 	}
 
-	// 写入 node 数据
+	// 退出递归的条件：将 node 数据写入 batch
 	if err := batch.Put(hash[:], node.blob); err != nil {
 		return err
 	}
@@ -214,4 +219,41 @@ func (db *Database) secureKey(key []byte) []byte {
 	buf := append(db.seckeybuf[:0], secureKeyPrefix...)
 	buf = append(buf, key...)
 	return buf
+}
+
+func (db *Database) insertPreimage(hash common.Hash, preimage []byte) {
+	if _, ok := db.preimages[hash]; ok {
+		return
+	}
+	db.preimages[hash] = common.CopyBytes(preimage)
+	db.preimagesSize += common.StorageSize(common.HashLength + len(preimage))
+}
+
+func (db *Database) preimage(hash common.Hash) ([]byte, error) {
+	db.lock.RLock()
+	preimage := db.preimages[hash]
+	db.lock.RUnlock()
+
+	if preimage != nil {
+		return preimage, nil
+	}
+
+	return db.diskdb.Get(db.secureKey(hash[:]))
+}
+
+func (db *Database) DiskDB() DatabaseReader {
+	return db.diskdb
+}
+
+func (db *Database) Nodes() []common.Hash {
+	db.lock.RLock()
+	defer db.lock.RUnlock()
+
+	var hashes = make([]common.Hash, 0, len(db.nodes))
+	for hash := range db.nodes {
+		if hash != (common.Hash{}) {
+			hashes = append(hashes, hash)
+		}
+	}
+	return hashes
 }

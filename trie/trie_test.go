@@ -15,13 +15,18 @@ func newEmpty() *Trie {
 }
 
 func TestEmptyTrie(t *testing.T) {
-	var trie Trie
+	trie, err := New(common.Hash{}, NewDatabase(ethdb.NewMemDatabase()))
+	if err != nil {
+		t.Errorf("New Trie error: %v", err)
+	}
+
+	// 计算分支节点 Hash
 	res := trie.Hash()
 	exp := emptyRoot
 	if res != exp {
 		t.Errorf("expected %x got %x", exp, res)
 	}
-	fmt.Printf("empty trie hash = %x \n", res.Bytes())
+	fmt.Printf("empty trie root = %s, empty trie hash = %x \n", trie.root, res.Bytes())
 }
 
 func TestNull(t *testing.T) {

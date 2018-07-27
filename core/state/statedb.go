@@ -3,7 +3,10 @@ package state
 import (
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
+
+	"github.com/czh0526/blockchain/trie"
 
 	"github.com/czh0526/blockchain/common"
 	"github.com/czh0526/blockchain/crypto"
@@ -16,14 +19,22 @@ var (
 	emptyCode  = crypto.Keccak256Hash(nil)
 )
 
+type revision struct {
+	id           int
+	journalIndex int
+}
+
 type StateDB struct {
 	db                Database
 	trie              Trie
 	stateObjects      map[common.Address]*stateObject
 	stateObjectsDirty map[common.Address]struct{}
 
-	journal *journal
-	refund  uint64
+	journal        *journal
+	validRevisions []revision
+	nextRevisionId int
+
+	refund uint64
 
 	dbErr error
 	lock  sync.Mutex
@@ -43,6 +54,33 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 	}, nil
 }
 
+func (self *StateDB) Database() Database {
+	return self.db
+}
+
+// 标记一个快照 ( 记录 journal 的位置 )
+func (self *StateDB) Snapshot() int {
+	id := self.nextRevisionId
+	self.nextRevisionId++
+	self.validRevisions = append(self.validRevisions, revision{id, self.journal.length()})
+	return id
+}
+
+func (self *StateDB) RevertToSnapshot(revid int) {
+	idx := sort.Search(len(self.validRevisions), func(i int) bool {
+		return self.validRevisions[i].id >= revid
+	})
+	if idx == len(self.validRevisions) || self.validRevisions[idx].id != revid {
+		panic(fmt.Errorf("revision id %v cannot be reverted", revid))
+	}
+
+	snapshot := self.validRevisions[idx].journalIndex
+	// 将日志回退到 idx
+	self.journal.revert(self, snapshot)
+	// 将快照回退到 idx
+	self.validRevisions = self.validRevisions[:idx]
+}
+
 func (self *StateDB) Copy() *StateDB {
 	self.lock.Lock()
 	defer self.lock.Unlock()
@@ -52,6 +90,8 @@ func (self *StateDB) Copy() *StateDB {
 		trie:              self.db.CopyTrie(self.trie),
 		stateObjects:      make(map[common.Address]*stateObject, 0),
 		stateObjectsDirty: make(map[common.Address]struct{}, 0),
+		refund:            self.refund,
+		journal:           newJournal(),
 	}
 
 	return state
@@ -106,7 +146,7 @@ func (self *StateDB) getStateObject(addr common.Address) (stateObject *stateObje
 	}
 	var data Account
 	if err := rlp.DecodeBytes(enc, &data); err != nil {
-		log.Error(fmt.Sprintf("Failed to decode state object, addr = %v, err = %v"))
+		log.Error(fmt.Sprintf("Failed to decode state object, addr = %v, err = %v", addr, err))
 		return nil
 	}
 
@@ -193,6 +233,33 @@ func (self *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	}
 }
 
+func (self *StateDB) GetState(addr common.Address, bhash common.Hash) common.Hash {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.GetState(self.db, bhash)
+	}
+	return common.Hash{}
+}
+
+func (db *StateDB) ForEachStorage(addr common.Address, cb func(key, value common.Hash) bool) {
+	so := db.getStateObject(addr)
+	if so == nil {
+		return
+	}
+
+	for h, value := range so.cachedStorage {
+		cb(h, value)
+	}
+
+	it := trie.NewIterator(so.getTrie(db.db).NodeIterator(nil))
+	for it.Next() {
+		key := common.BytesToHash(db.trie.GetKey(it.Key))
+		if _, ok := so.cachedStorage[key]; !ok {
+			cb(key, common.BytesToHash(it.Value))
+		}
+	}
+}
+
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	s.Finalise(deleteEmptyObjects)
 	return s.trie.Hash()
@@ -211,7 +278,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		} else {
 			// 更新 Storage Trie Hash
 			stateObject.updateRoot(s.db)
-			// 更新 Block's State Trie
+			// 更新 State Trie
 			s.updateStateObject(stateObject)
 		}
 		s.stateObjectsDirty[addr] = struct{}{}
@@ -232,6 +299,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (root common.Hash, err error) 
 		s.stateObjectsDirty[addr] = struct{}{}
 	}
 
+	// 更新 trie 树的叶节点内容
 	for addr, stateObject := range s.stateObjects {
 		_, isDirty := s.stateObjectsDirty[addr]
 		switch {
@@ -253,6 +321,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (root common.Hash, err error) 
 		delete(s.stateObjectsDirty, addr)
 	}
 
+	//  调用 Trie 更新，刷新到 trie.Database 
 	root, err = s.trie.Commit(func(leaf []byte, parent common.Hash) error {
 		var account Account
 		if err := rlp.DecodeBytes(leaf, &account); err != nil {
@@ -268,4 +337,55 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (root common.Hash, err error) 
 		return nil
 	})
 	return root, err
+}
+
+func (self *StateDB) Exist(addr common.Address) bool {
+	return self.getStateObject(addr) != nil
+}
+
+func (self *StateDB) HasSuicided(addr common.Address) bool {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.suicided
+	}
+	return false
+}
+
+func (self *StateDB) GetBalance(addr common.Address) *big.Int {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Balance()
+	}
+	return common.Big0
+}
+
+func (self *StateDB) GetCode(addr common.Address) []byte {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Code(self.db)
+	}
+	return nil
+}
+
+func (self *StateDB) GetCodeSize(addr common.Address) int {
+	stateObject := self.getStateObject(addr)
+	if stateObject == nil {
+		return 0
+	}
+	if stateObject.code != nil {
+		return len(stateObject.code)
+	}
+	size, err := self.db.ContractCodeSize(stateObject.addrHash, common.BytesToHash(stateObject.CodeHash()))
+	if err != nil {
+		self.setError(err)
+	}
+	return size
+}
+
+func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
+	stateObject := self.getStateObject(addr)
+	if stateObject == nil {
+		return common.Hash{}
+	}
+	return common.BytesToHash(stateObject.CodeHash())
 }

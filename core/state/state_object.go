@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math/big"
 
 	"github.com/czh0526/blockchain/common"
@@ -56,6 +57,10 @@ func newObject(db *StateDB, address common.Address, data Account) *stateObject {
 	}
 }
 
+func (c *stateObject) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, c.data)
+}
+
 // 获取 Storage Trie
 func (c *stateObject) getTrie(db Database) Trie {
 	if c.trie == nil {
@@ -94,11 +99,11 @@ func (self *stateObject) updateRoot(db Database) {
 func (self *stateObject) CommitTrie(db Database) error {
 	self.updateTrie(db)
 	if self.dbErr != nil {
-		return self.dbErr 
+		return self.dbErr
 	}
 	root, err := self.trie.Commit(nil)
 	if err == nil {
-		self.data.Root = root 
+		self.data.Root = root
 	}
 	return err
 }
@@ -223,6 +228,12 @@ func (self *stateObject) setState(key, value common.Hash) {
 }
 
 func (self *stateObject) SetCode(codeHash common.Hash, code []byte) {
+	prevcode := self.Code(self.db.db)
+	self.db.journal.append(codeChange{
+		account:  &self.address,
+		prevhash: self.CodeHash(),
+		prevcode: prevcode,
+	})
 	self.setCode(codeHash, code)
 }
 
@@ -230,4 +241,19 @@ func (self *stateObject) setCode(codeHash common.Hash, code []byte) {
 	self.code = code
 	self.data.CodeHash = codeHash[:]
 	self.dirtyCode = true
+}
+
+func (self *stateObject) Code(db Database) []byte {
+	if self.code != nil {
+		return self.code
+	}
+	if bytes.Equal(self.CodeHash(), emptyCodeHash) {
+		return nil
+	}
+	code, err := db.ContractCode(self.addrHash, common.BytesToHash(self.CodeHash()))
+	if err != nil {
+		self.setError(fmt.Errorf("can't load code hash %x: %v", self.CodeHash(), err))
+	}
+	self.code = code
+	return code
 }

@@ -123,6 +123,7 @@ func decodeNode(hash, buf []byte, cachegen uint16) (node, error) {
 	if len(buf) == 0 {
 		return nil, io.ErrUnexpectedEOF
 	}
+	fmt.Printf("decodeNode():    %x => %x \n", hash[:8], buf[:])
 	elems, _, err := rlp.SplitList(buf)
 	if err != nil {
 		return nil, fmt.Errorf("decode error: %v", err)

@@ -427,6 +427,7 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
 func (t *Trie) Hash() common.Hash {
+	// 计算分支节点 Hash，不写入 triedb 数据库
 	hash, cached, _ := t.hashRoot(nil, nil)
 	t.root = cached
 	return common.BytesToHash(hash.(hashNode))
@@ -438,6 +439,7 @@ func (t *Trie) Commit(onleaf LeafCallback) (root common.Hash, err error) {
 	if t.db == nil {
 		panic("commit called on trie with nil database")
 	}
+	// 计算分支节点的 Hash, 并写入 t.db 数据库
 	hash, cached, err := t.hashRoot(t.db, onleaf)
 	if err != nil {
 		return common.Hash{}, err

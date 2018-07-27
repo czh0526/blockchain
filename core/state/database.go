@@ -21,10 +21,10 @@ type Trie interface {
 	TryGet(key []byte) ([]byte, error)
 	TryUpdate(key, value []byte) error
 	TryDelete(key []byte) error
-
 	Commit(onleaf trie.LeafCallback) (common.Hash, error)
-
 	Hash() common.Hash
+	GetKey([]byte) []byte
+	NodeIterator(startKey []byte) trie.NodeIterator
 }
 
 type Database interface {
@@ -33,6 +33,9 @@ type Database interface {
 	CopyTrie(t Trie) Trie
 
 	TrieDB() *trie.Database
+
+	ContractCode(addrHash, codeHash common.Hash) ([]byte, error)
+	ContractCodeSize(addrHash, codeHash common.Hash) (int, error)
 }
 
 func NewDatabase(db ethdb.Database) Database {
@@ -83,6 +86,25 @@ func (db *cachingDB) CopyTrie(t Trie) Trie {
 	default:
 		panic(fmt.Errorf("unknown trie type %T", t))
 	}
+}
+
+func (db *cachingDB) ContractCode(addrHash, codeHash common.Hash) ([]byte, error) {
+	// 从 trie Database 中查询 code 字节
+	code, err := db.db.Node(codeHash)
+	if err == nil {
+		// 计算 code 长度
+		db.codeSizeCache.Add(codeHash, len(code))
+	}
+	// 返回 code
+	return code, err
+}
+
+func (db *cachingDB) ContractCodeSize(addrHash, codeHash common.Hash) (int, error) {
+	if cached, ok := db.codeSizeCache.Get(codeHash); ok {
+		return cached.(int), nil
+	}
+	code, err := db.ContractCode(addrHash, codeHash)
+	return len(code), err
 }
 
 type cachedTrie struct {
