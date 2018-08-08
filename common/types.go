@@ -69,6 +69,14 @@ func (a Address) Hex() string {
 
 type UnprefixedAddress Address
 
+func (a *UnprefixedAddress) UnmarshalText(input []byte) error {
+	return hexutil.UnmarshalFixedText("UnprefixedAddress", input, a[:])
+}
+
+func (a UnprefixedAddress) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(a[:])), nil
+}
+
 func BytesToHash(b []byte) Hash {
 	var h Hash
 	h.SetBytes(b)
