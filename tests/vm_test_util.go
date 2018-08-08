@@ -48,6 +48,17 @@ type vmExec struct {
 	GasPrice *big.Int       `json:"gasprice" gencodec:"required"`
 }
 
+type vmExecMarshaling struct {
+	Address common.UnprefixedAddress 
+	Caller common.UnprefixedAddress 
+	Origin common.UnprefixedAddress
+	Code hexutil.Bytes 
+	Data hexutil.Bytes 
+	Value *math.HexOrDecimal256
+	GasLimit math.HexOrDecimal64
+	GasPrice *math.HexOrDecimal256
+}
+
 func (t *VMTest) Run(vmconfig vm.Config) error {
 	statedb := MakePreState(ethdb.NewMemDatabase(), t.json.Pre)
 	ret, gasRemaining, err := t.exec(statedb, vmconfig)
