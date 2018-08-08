@@ -11,11 +11,11 @@ import (
 )
 
 type stEnv struct {
-	Coinbase   common.Address
-	Difficulty *big.Int
-	GasLimit   uint64
-	Number     uint64
-	Timestamp  uint64
+	Coinbase   common.Address `json:"currentCoinbase" gencodec:"required"`
+	Difficulty *big.Int       `json:"currentDifficluty" gencodec:"required"`
+	GasLimit   uint64         `json:"currentGasLimit" gencodec:"required"`
+	Number     uint64         `json:"currentNumber" gencodec:"required"`
+	Timestamp  uint64         `json:"currentTimestamp" gencodec:"required"`
 }
 
 type stEnvMarshaling struct {
