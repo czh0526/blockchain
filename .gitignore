@@ -5,3 +5,4 @@
 cmd/shadow/nodekey 
 cmd/shadow/debug
 cmd/shadow/shadow
+debug.test
