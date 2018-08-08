@@ -126,3 +126,13 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	pubBytes := FromECDSAPub(&p)
 	return common.BytesToAddress(Keccak256(pubBytes[1:])[12:])
 }
+
+func ValidateSignatureValues(v byte, r, s *big.Int, homestead bool) bool {
+	if r.Cmp(common.Big1) < 0 || s.Cmp(common.Big1) < 0 {
+		return false
+	}
+	if homestead && s.Cmp(secp256k1halfN) > 0 {
+		return false
+	}
+	return r.Cmp(secp256k1N) < 0 && s.Cmp(secp256k1N) < 0 && (v == 0 || v == 1)
+}

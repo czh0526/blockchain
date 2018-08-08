@@ -1,18 +1,21 @@
 package tests
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"math/big"
 
 	"github.com/czh0526/blockchain/core"
 	"github.com/czh0526/blockchain/crypto"
+	"github.com/czh0526/blockchain/ethdb"
+	"github.com/czh0526/blockchain/params"
 
 	"github.com/czh0526/blockchain/common"
 	"github.com/czh0526/blockchain/common/hexutil"
 	"github.com/czh0526/blockchain/common/math"
 	"github.com/czh0526/blockchain/core/state"
 	"github.com/czh0526/blockchain/core/vm"
-	"github.com/czh0526/blockchain/ethdb"
 )
 
 type VMTest struct {
@@ -49,6 +52,24 @@ func (t *VMTest) Run(vmconfig vm.Config) error {
 	statedb := MakePreState(ethdb.NewMemDatabase(), t.json.Pre)
 	ret, gasRemaining, err := t.exec(statedb, vmconfig)
 
+	if t.json.GasRemaining == nil {
+		if err == nil {
+			return fmt.Errorf("gas unspecified (indicating an error), but VM returned no error")
+		}
+		if gasRemaining > 0 {
+			return fmt.Errorf("gas unspecified (indicating an error), but VM returned gas remaining > 0")
+		}
+		return nil
+	}
+
+	if !bytes.Equal(ret, t.json.Out) {
+		return fmt.Errorf("return data mismatch: got %x, want %x", ret, t.json.Out)
+	}
+	if gasRemaining != uint64(*t.json.GasRemaining) {
+		return fmt.Errorf("remaining gas %v, want %v", gasRemaining, *t.json.GasRemaining)
+	}
+
+	return nil
 }
 
 func (t *VMTest) exec(statedb *state.StateDB, vmconfig vm.Config) ([]byte, uint64, error) {
@@ -66,19 +87,24 @@ func (t *VMTest) newEVM(statedb *state.StateDB, vmconfig vm.Config) *vm.EVM {
 		}
 		return core.CanTransfer(db, address, amount)
 	}
+
 	transfer := func(db vm.StateDB, sender, recipient common.Address, amount *big.Int) {}
 	context := vm.Context{
 		CanTransfer: canTransfer,
 		Transfer:    transfer,
 		GetHash:     vmTestBlockHash,
+		Origin:      t.json.Exec.Origin,
+		Coinbase:    t.json.Env.Coinbase,
+		BlockNumber: new(big.Int).SetUint64(t.json.Env.Number),
+		Time:        new(big.Int).SetUint64(t.json.Env.Timestamp),
+		GasLimit:    t.json.Env.GasLimit,
+		Difficulty:  t.json.Env.Difficulty,
+		GasPrice:    t.json.Exec.GasPrice,
 	}
 	vmconfig.NoRecursion = true
-	return vm.NewEVM(context, statedb)
+	return vm.NewEVM(context, statedb, params.TestChainConfig, vmconfig)
 }
 
 func vmTestBlockHash(n uint64) common.Hash {
-	return common.BytesToHash(
-		crypto.Keccak256(
-			[]byte(
-				big.NewInt(int64(n)).String())))
+	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
 }

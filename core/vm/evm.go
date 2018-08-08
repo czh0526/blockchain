@@ -109,6 +109,51 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	return ret, contract.Gas, err
 }
 
+func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	if evm.vmConfig.NoRecursion && evm.depth > 0 {
+		return nil, gas, nil
+	}
+	if evm.depth > int(params.CallCreateDepth) {
+		return nil, gas, ErrDepth
+	}
+
+	if !evm.interpreter.readOnly {
+		evm.interpreter.readOnly = true
+		defer func() {
+			evm.interpreter.readOnly = false
+		}()
+	}
+
+	var (
+		to       = AccountRef(addr)
+		snapshot = evm.StateDB.Snapshot()
+	)
+
+	// 构建合约对象
+	contract := NewContract(caller, to, new(big.Int), gas)
+	contract.SetCallCode(&addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetCode(addr))
+
+	// 使用 evm 执行合约，input 为参数
+	ret, err = run(evm, contract, input)
+	if err != nil {
+		evm.StateDB.RevertToSnapshot(snapshot)
+		if err != errExecutionReverted {
+			contract.UseGas(contract.Gas)
+		}
+	}
+
+	return ret, contract.Gas, err
+}
+
+// 使用 input 作为参数运行 contract 智能合约
 func run(evm *EVM, contract *Contract, input []byte) ([]byte, error) {
+	if contract.CodeAddr != nil {
+		// 如果是预编译的 contract, 执行预编译的函数
+		precompiles := PrecompiledContractsHomestead
+		if p := precompiles[*contract.CodeAddr]; p != nil {
+			return RunPrecompiledContract(p, input, contract)
+		}
+	}
+	// 否则，运行 contract.Code
 	return evm.interpreter.Run(contract, input)
 }

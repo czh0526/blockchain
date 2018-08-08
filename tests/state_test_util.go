@@ -4,17 +4,26 @@ import (
 	"math/big"
 
 	"github.com/czh0526/blockchain/common"
+	"github.com/czh0526/blockchain/common/math"
 	"github.com/czh0526/blockchain/core"
 	"github.com/czh0526/blockchain/core/state"
 	"github.com/czh0526/blockchain/ethdb"
 )
 
 type stEnv struct {
-	Coinbase   common.Address `json:"currentCoinbase" gencodec:"required"`
-	Difficulty *big.Int       `json:"currentDifficulty" gencodec:"required"`
-	GasLimit   uint64         `json:"currentGasLimit" gencodec:"required"`
-	Number     uint64         `json:"currentNumber" gencodec:"required"`
-	Timestamp  uint64         `json:"currentTimestamp" gencodec:"required"`
+	Coinbase   common.Address
+	Difficulty *big.Int
+	GasLimit   uint64
+	Number     uint64
+	Timestamp  uint64
+}
+
+type stEnvMarshaling struct {
+	Coinbase   common.UnprefixedAddress
+	Difficulty *math.HexOrDecimal256
+	GasLimit   math.HexOrDecimal64
+	Number     math.HexOrDecimal64
+	Timestamp  math.HexOrDecimal64
 }
 
 func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) *state.StateDB {

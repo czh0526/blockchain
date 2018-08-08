@@ -1,19 +1,16 @@
 package tests
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/czh0526/blockchain/core/vm"
+)
 
 func TestVM(t *testing.T) {
-	t.Parallel()
+	var vmt VMTest
+	if err := readJSONFile("./testdata/sha3_0.json", &vmt); err != nil {
+		t.Fatal(err)
+	}
 
-	vmt := new(testMatcher)
-	vmt.fails("^vmSystemOperationsTest.json/createNameRegistrator$", "fails without parallel execution")
-
-	vmt.skipLoad(`^vmInputLimits(Light)?.json`)
-
-	vmt.skipShortMode("^vmPerformanceTest.json")
-	vmt.skipShortMode("^vmInputLimits(Light)?.json")
-
-	vmt.walk(t, vmTestDir, func(t *testing.T, name string, test *VMTest) {
-		
-	})
+	vmt.Run(vm.Config{Debug: false})
 }

@@ -2,6 +2,8 @@ package vm
 
 import "math/big"
 
+const poolLimit = 256
+
 type intPool struct {
 	pool *Stack
 }
@@ -15,4 +17,14 @@ func (p *intPool) get() *big.Int {
 		return p.pool.pop()
 	}
 	return new(big.Int)
+}
+
+func (p *intPool) put(is ...*big.Int) {
+	if len(p.pool.data) > poolLimit {
+		return
+	}
+
+	for _, i := range is {
+		p.pool.push(i)
+	}
 }

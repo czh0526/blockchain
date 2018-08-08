@@ -17,7 +17,6 @@ import (
 
 	"github.com/czh0526/blockchain/common"
 	"github.com/czh0526/blockchain/crypto"
-	"github.com/czh0526/blockchain/crypto/secp256k1"
 )
 
 const NodeIDBits = 512
@@ -213,7 +212,8 @@ func distcmp(target, a, b common.Hash) int {
 }
 
 func recoverNodeID(hash, sig []byte) (id NodeID, err error) {
-	pubkey, err := secp256k1.RecoverPubkey(hash, sig)
+	//pubkey, err := secp256k1.RecoverPubkey(hash, sig)
+	pubkey, err := crypto.Ecrecover(hash, sig)
 	if err != nil {
 		return id, err
 	}

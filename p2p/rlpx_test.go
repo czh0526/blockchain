@@ -28,7 +28,7 @@ func TestSharedSecret(t *testing.T) {
 	prv1, _ := crypto.GenerateKey()
 	pub1 := &prv1.PublicKey
 
-	// 使用0的PrivateKey和1的PublicKey构建共享的对称密钥
+	// ecies.PrivateKey + ecies.PublicKey ==> ss
 	ss0, err := ecies.ImportECDSA(prv0).GenerateShared(ecies.ImportECDSAPublic(pub1), sskLen, sskLen)
 	if err != nil {
 		return

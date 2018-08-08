@@ -321,7 +321,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (root common.Hash, err error) 
 		delete(s.stateObjectsDirty, addr)
 	}
 
-	//  调用 Trie 更新，刷新到 trie.Database 
+	//  调用 Trie 更新，刷新到 trie.Database
 	root, err = s.trie.Commit(func(leaf []byte, parent common.Hash) error {
 		var account Account
 		if err := rlp.DecodeBytes(leaf, &account); err != nil {
@@ -388,4 +388,9 @@ func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
 		return common.Hash{}
 	}
 	return common.BytesToHash(stateObject.CodeHash())
+}
+
+func (self *StateDB) Empty(addr common.Address) bool {
+	so := self.getStateObject(addr)
+	return so == nil || so.empty()
 }

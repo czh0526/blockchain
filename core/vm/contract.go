@@ -25,7 +25,7 @@ type Contract struct {
 
 	Code     []byte
 	CodeHash common.Hash
-	CodeAddr *common.Address
+	CodeAddr *common.Address // 预编译合约的地址
 	Input    []byte
 
 	Gas   uint64
@@ -70,7 +70,7 @@ func (c *Contract) GetOp(n uint64) OpCode {
 	return OpCode(c.GetByte(n))
 }
 
-// 在 code 字敦中获取指定位置的字节内容
+// 在 code 字节中获取指定位置的字节内容
 func (c *Contract) GetByte(n uint64) byte {
 	if n < uint64(len(c.Code)) {
 		return c.Code[n]

@@ -21,7 +21,6 @@ import (
 
 	"github.com/czh0526/blockchain/crypto"
 	"github.com/czh0526/blockchain/crypto/ecies"
-	"github.com/czh0526/blockchain/crypto/secp256k1"
 	"github.com/czh0526/blockchain/crypto/sha3"
 	"github.com/czh0526/blockchain/log"
 	"github.com/czh0526/blockchain/p2p/discover"
@@ -256,7 +255,8 @@ func (h *encHandshake) handleAuthMsg(msg *authMsgV4, prv *ecdsa.PrivateKey) erro
 	signedMsg := xor(token, h.initNonce)
 
 	// 根据 signedMsg + msg => remote random pub
-	remoteRandomPub, err := secp256k1.RecoverPubkey(signedMsg, msg.Signature[:])
+	//remoteRandomPub, err := secp256k1.RecoverPubkey(signedMsg, msg.Signature[:])
+	remoteRandomPub, err := crypto.Ecrecover(signedMsg, msg.Signature[:])
 	if err != nil {
 		return err
 	}
@@ -271,13 +271,13 @@ func (h *encHandshake) handleAuthResp(msg *authRespV4) (err error) {
 }
 
 func (h *encHandshake) makeAuthMsg(prv *ecdsa.PrivateKey, token []byte) (*authMsgV4, error) {
-	// 远程节点的NodeID => 签名公钥
+	// 远程节点的NodeID => dsa pubkey
 	rpub, err := h.remoteID.Pubkey()
 	if err != nil {
 		return nil, fmt.Errorf("bad remoteID: %v", err)
 	}
 
-	// 远程节点的签名公钥 => 加密公钥
+	// dsa pubkey => ecies pubkey
 	h.remotePub = ecies.ImportECDSAPublic(rpub)
 	// 获取随机数
 	h.initNonce = make([]byte, shaLen)
@@ -291,7 +291,7 @@ func (h *encHandshake) makeAuthMsg(prv *ecdsa.PrivateKey, token []byte) (*authMs
 		return nil, err
 	}
 
-	// 本地节点的加密私钥 + 远程节点的加密公钥 => token
+	// 本地节点的 dsa privkey + 远程节点的加密公钥 => token
 	token, err = h.staticSharedSecret(prv)
 	if err != nil {
 		return nil, err
