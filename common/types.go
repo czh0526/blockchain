@@ -34,6 +34,14 @@ func (h Hash) Hex() string { return hexutil.Encode(h[:]) }
 
 type UnprefixedHash Hash
 
+func (h *UnprefixedHash) UnmarshalText(input []byte) error {
+	return hexutil.UnmarshalFixedUnprefixedText("UnprefixedHash", input, h[:])
+}
+
+func (h UnprefixedHash) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(h[:])), nil
+}
+
 func HexToHash(s string) Hash { return BytesToHash(FromHex(s)) }
 
 type Address [AddressLength]byte
