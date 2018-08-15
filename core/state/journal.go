@@ -60,6 +60,11 @@ type (
 	resetObjectChange struct {
 		prev *stateObject
 	}
+	suicideChange struct {
+		account     *common.Address
+		prev        bool
+		prevbalance *big.Int
+	}
 	nonceChange struct {
 		account *common.Address
 		prev    uint64
@@ -75,6 +80,12 @@ type (
 	codeChange struct {
 		account            *common.Address
 		prevcode, prevhash []byte
+	}
+	refundChange struct {
+		prev uint64
+	}
+	addPreimageChange struct {
+		hash common.Hash
 	}
 	touchChange struct {
 		account   *common.Address
@@ -135,5 +146,33 @@ func (ch balanceChange) revert(s *StateDB) {
 }
 
 func (ch balanceChange) dirtied() *common.Address {
+	return ch.account
+}
+
+func (ch addPreimageChange) revert(s *StateDB) {
+	delete(s.preimages, ch.hash)
+}
+
+func (ch addPreimageChange) dirtied() *common.Address {
+	return nil
+}
+
+func (ch refundChange) revert(s *StateDB) {
+	s.refund = ch.prev
+}
+
+func (ch refundChange) dirtied() *common.Address {
+	return nil
+}
+
+func (ch suicideChange) revert(s *StateDB) {
+	obj := s.getStateObject(*ch.account)
+	if obj != nil {
+		obj.suicided = ch.prev
+		obj.setBalance(ch.prevbalance)
+	}
+}
+
+func (ch suicideChange) dirtied() *common.Address {
 	return ch.account
 }

@@ -40,7 +40,7 @@ func (st *Stack) swap(n int) {
 	st.data[st.len()-n], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-n]
 }
 
-// 将位置 n 的元素复制到 intPool 中
+// 将位置 n 的元素复制到栈顶
 func (st *Stack) dup(pool *intPool, n int) {
 	st.push(pool.get().Set(st.data[st.len()-n]))
 }

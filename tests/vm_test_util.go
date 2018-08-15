@@ -49,12 +49,12 @@ type vmExec struct {
 }
 
 type vmExecMarshaling struct {
-	Address common.UnprefixedAddress 
-	Caller common.UnprefixedAddress 
-	Origin common.UnprefixedAddress
-	Code hexutil.Bytes 
-	Data hexutil.Bytes 
-	Value *math.HexOrDecimal256
+	Address  common.UnprefixedAddress
+	Caller   common.UnprefixedAddress
+	Origin   common.UnprefixedAddress
+	Code     hexutil.Bytes
+	Data     hexutil.Bytes
+	Value    *math.HexOrDecimal256
 	GasLimit math.HexOrDecimal64
 	GasPrice *math.HexOrDecimal256
 }
@@ -78,6 +78,14 @@ func (t *VMTest) Run(vmconfig vm.Config) error {
 	}
 	if gasRemaining != uint64(*t.json.GasRemaining) {
 		return fmt.Errorf("remaining gas %v, want %v", gasRemaining, *t.json.GasRemaining)
+	}
+
+	for addr, account := range t.json.Post {
+		for k, wantV := range account.Storage {
+			if haveV := statedb.GetState(addr, k); haveV != wantV {
+				return fmt.Errorf("wrong storage value at %x:\n got %x\n want %x", k, haveV, wantV)
+			}
+		}
 	}
 
 	return nil

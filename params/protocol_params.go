@@ -5,6 +5,20 @@ const (
 	CallCreateDepth uint64 = 1024
 	MemoryGas       uint64 = 3
 
+	CallValueTransferGas uint64 = 9000
+
+	Sha3Gas          uint64 = 30
+	Sha3WordGas      uint64 = 6
+	SstoreSetGas     uint64 = 20000
+	SstoreResetGas   uint64 = 5000
+	SstoreClearGas   uint64 = 5000
+	SstoreRefundGas  uint64 = 15000
+	JumpdestGas      uint64 = 1
+	CopyGas          uint64 = 3
+	StackLimit       uint64 = 1024
+	CreateGas        uint64 = 32000
+	SuicideRefundGas uint64 = 24000
+
 	// Precompiled contract gas prices
 
 	EcrecoverGas            uint64 = 3000   // Elliptic curve sender recovery gas price
@@ -19,4 +33,5 @@ const (
 	Bn256ScalarMulGas       uint64 = 40000  // Gas needed for an elliptic curve scalar multiplication
 	Bn256PairingBaseGas     uint64 = 100000 // Base price for an elliptic curve pairing check
 	Bn256PairingPerPointGas uint64 = 80000  // Per-point price for an elliptic curve pairing check
+
 )

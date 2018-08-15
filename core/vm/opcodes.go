@@ -31,7 +31,7 @@ const (
 	NOT
 	BYTE
 	SHL
-	SHR
+	SHRSHA3
 	SAR
 
 	SHA3 = 0x20

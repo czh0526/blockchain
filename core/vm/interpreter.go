@@ -85,11 +85,14 @@ func (in *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err er
 			logged, pcCopy, gasCopy = false, pc, contract.Gas
 		}
 
+		// 获取指令
 		op = contract.GetOp(pc)
 		operation := in.cfg.JumpTable[op]
 		if !operation.valid {
 			return nil, fmt.Errorf("invalid opcode 0x%x", int(op))
 		}
+
+		// 检查堆栈
 		if err := operation.validateStack(stack); err != nil {
 			return nil, err
 		}
@@ -98,6 +101,7 @@ func (in *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err er
 			return nil, err
 		}
 
+		// 计算使用的内存空间
 		var memorySize uint64
 		if operation.memorySize != nil {
 			memSize, overflow := bigUint64(operation.memorySize(stack))
@@ -110,6 +114,7 @@ func (in *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err er
 			}
 		}
 
+		// 计算 gas = memory gas + operation gas
 		cost, err = operation.gasCost(in.gasTable, in.evm, contract, stack, mem, memorySize)
 		if err != nil || !contract.UseGas(cost) {
 			return nil, ErrOutOfGas
@@ -123,6 +128,7 @@ func (in *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err er
 			logged = true
 		}
 
+		// 执行
 		res, err := operation.execute(&pc, in.evm, contract, mem, stack)
 		/*
 			commented for testing
@@ -140,9 +146,9 @@ func (in *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err er
 			return nil, err
 		case operation.reverts:
 			return res, errExecutionReverted
-		case operation.halts:
+		case operation.halts: // 停止
 			return res, nil
-		case !operation.jumps:
+		case !operation.jumps: // 循环
 			pc++
 		}
 	}

@@ -8,9 +8,11 @@ import (
 
 func TestVM(t *testing.T) {
 	var vmt VMTest
-	if err := readJSONFile("./testdata/sha3_0.json", &vmt); err != nil {
+	if err := readJSONFile("./testdata/vmEnvironmentalInfo/calldatacopy_DataIndexTooHigh_return.json", &vmt); err != nil {
 		t.Fatal(err)
 	}
 
-	vmt.Run(vm.Config{Debug: false})
+	if err := vmt.Run(vm.Config{Debug: false}); err != nil {
+		t.Fatal(err)
+	}
 }

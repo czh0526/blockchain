@@ -257,3 +257,7 @@ func (self *stateObject) Code(db Database) []byte {
 	self.code = code
 	return code
 }
+
+func (self *stateObject) markSuicided() {
+	self.suicided = true
+}

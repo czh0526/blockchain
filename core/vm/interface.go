@@ -18,9 +18,20 @@ type StateDB interface {
 	SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int
 
+	GetState(common.Address, common.Hash) common.Hash
+	SetState(common.Address, common.Hash, common.Hash)
+
+	AddRefund(uint64)
+	GetRefund() uint64
+
 	Exist(common.Address) bool
 	Empty(common.Address) bool
 
 	Snapshot() int
 	RevertToSnapshot(int)
+
+	AddPreimage(common.Hash, []byte)
+
+	Suicide(common.Address) bool
+	HasSuicided(common.Address) bool 
 }

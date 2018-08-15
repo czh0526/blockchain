@@ -36,6 +36,8 @@ type StateDB struct {
 
 	refund uint64
 
+	preimages map[common.Hash][]byte
+
 	dbErr error
 	lock  sync.Mutex
 }
@@ -343,14 +345,6 @@ func (self *StateDB) Exist(addr common.Address) bool {
 	return self.getStateObject(addr) != nil
 }
 
-func (self *StateDB) HasSuicided(addr common.Address) bool {
-	stateObject := self.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.suicided
-	}
-	return false
-}
-
 func (self *StateDB) GetBalance(addr common.Address) *big.Int {
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
@@ -393,4 +387,46 @@ func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
 func (self *StateDB) Empty(addr common.Address) bool {
 	so := self.getStateObject(addr)
 	return so == nil || so.empty()
+}
+
+func (self *StateDB) AddPreimage(hash common.Hash, preimage []byte) {
+	if _, ok := self.preimages[hash]; !ok {
+		self.journal.append(addPreimageChange{hash: hash})
+		pi := make([]byte, len(preimage))
+		copy(pi, preimage)
+		self.preimages[hash] = pi
+	}
+}
+
+func (self *StateDB) AddRefund(gas uint64) {
+	self.journal.append(refundChange{prev: self.refund})
+	self.refund += gas
+}
+
+func (self *StateDB) GetRefund() uint64 {
+	return self.refund
+}
+
+func (self *StateDB) HasSuicided(addr common.Address) bool {
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.suicided
+	}
+	return false
+}
+
+func (self *StateDB) Suicide(addr common.Address) bool {
+	stateObject := self.getStateObject(addr)
+	if stateObject == nil {
+		return false
+	}
+	self.journal.append(suicideChange{
+		account:     &addr,
+		prev:        stateObject.suicided,
+		prevbalance: new(big.Int).Set(stateObject.Balance()),
+	})
+	stateObject.markSuicided()
+	stateObject.data.Balance = new(big.Int)
+
+	return true
 }

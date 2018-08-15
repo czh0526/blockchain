@@ -29,6 +29,7 @@ func (m *Memory) Resize(size uint64) {
 	}
 }
 
+// 返回 memory 里面的数据拷贝
 func (m *Memory) Get(offset, size int64) (cpy []byte) {
 	if size == 0 {
 		return nil
@@ -43,6 +44,7 @@ func (m *Memory) Get(offset, size int64) (cpy []byte) {
 	return
 }
 
+// 返回 memory 里的 slice
 func (m *Memory) GetPtr(offset, size int64) []byte {
 	if size == 0 {
 		return nil

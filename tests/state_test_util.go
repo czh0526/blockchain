@@ -1,14 +1,42 @@
 package tests
 
 import (
+	"encoding/json"
 	"math/big"
 
 	"github.com/czh0526/blockchain/common"
+	"github.com/czh0526/blockchain/common/hexutil"
 	"github.com/czh0526/blockchain/common/math"
 	"github.com/czh0526/blockchain/core"
 	"github.com/czh0526/blockchain/core/state"
 	"github.com/czh0526/blockchain/ethdb"
 )
+
+type StateTest struct {
+	json stJSON
+}
+
+func (t *StateTest) UnmarshalJSON(in []byte) error {
+	return json.Unmarshal(in, &t.json)
+}
+
+type stJSON struct {
+	ENV  stEnv                    `json:"env"`
+	Pre  core.GenesisAlloc        `josn:"pre"`
+	Tx   stTransaction            `json:"transaction"`
+	Out  hexutil.Bytes            `json:"out"`
+	Post map[string][]stPostState `json:"post"`
+}
+
+type stPostState struct {
+	Root    common.UnprefixedHash `json:"hash"`
+	Logs    common.UnprefixedHash `json:"logs"`
+	Indexes struct {
+		Data  int `json:"data"`
+		Gas   int `json:"gas"`
+		Value int `json:"value"`
+	}
+}
 
 type stEnv struct {
 	Coinbase   common.Address `json:"currentCoinbase" gencodec:"required"`
@@ -24,6 +52,23 @@ type stEnvMarshaling struct {
 	GasLimit   math.HexOrDecimal64
 	Number     math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
+}
+
+type stTransaction struct {
+	GasPrice   *big.Int `json:"gasPrice"`
+	Nonce      uint64   `json:"nonce"`
+	To         string   `json:"to"`
+	Data       []string `json:"data"`
+	GasLimit   []uint64 `json:"gasLimit"`
+	Value      []string `json:"value"`
+	PrivateKey []byte   `json:"scretKey"`
+}
+
+type stTransactionMarshaling struct {
+	GasPrice   *math.HexOrDecimal256
+	Nonce      math.HexOrDecimal64
+	GasLimit   []math.HexOrDecimal64
+	PrivateKey hexutil.Bytes
 }
 
 func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) *state.StateDB {

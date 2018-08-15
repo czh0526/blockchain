@@ -19,6 +19,13 @@ func (p *intPool) get() *big.Int {
 	return new(big.Int)
 }
 
+func (p *intPool) getZero() *big.Int {
+	if p.pool.len() > 0 {
+		return p.pool.pop().SetUint64(0)
+	}
+	return new(big.Int)
+}
+
 func (p *intPool) put(is ...*big.Int) {
 	if len(p.pool.data) > poolLimit {
 		return

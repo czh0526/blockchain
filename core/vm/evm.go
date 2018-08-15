@@ -43,6 +43,8 @@ type EVM struct {
 	vmConfig    Config
 	interpreter *Interpreter
 	abort       int32
+
+	callGasTemp uint64
 }
 
 func NewEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
@@ -76,6 +78,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}
 
 	var (
+		// 被调用人与调用人不一致
 		to       = AccountRef(addr)
 		snapshot = evm.StateDB.Snapshot()
 	)
@@ -85,7 +88,8 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	// 支付账户 ==> 目标账户
 	evm.Transfer(evm.StateDB, caller.Address(), to.Address(), value)
 
-	// 构建合约对象
+	// to 设置成 addr
+	// code 设置成 addr 对应的合约地址
 	contract := NewContract(caller, to, value, gas)
 	contract.SetCallCode(&addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetCode(addr))
 
@@ -100,6 +104,40 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}
 	ret, err = run(evm, contract, input)
 
+	if err != nil {
+		evm.StateDB.RevertToSnapshot(snapshot)
+		if err != errExecutionReverted {
+			contract.UseGas(contract.Gas)
+		}
+	}
+	return ret, contract.Gas, err
+}
+
+func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, gas uint64, value *big.Int) (ret []byte, leftOverFas uint64, err error) {
+	if evm.vmConfig.NoRecursion && evm.depth > 0 {
+		return nil, gas, nil
+	}
+
+	if evm.depth > int(params.CallCreateDepth) {
+		return nil, gas, ErrDepth
+	}
+
+	if !evm.CanTransfer(evm.StateDB, caller.Address(), value) {
+		return nil, gas, ErrInsufficientBalance
+	}
+
+	var (
+		snapshot = evm.StateDB.Snapshot()
+		// 调用人与被调用人一致
+		to = AccountRef(caller.Address())
+	)
+
+	// to 设置成 caller
+	// code 设置成 addr 对应的合约地址
+	contract := NewContract(caller, to, value, gas)
+	contract.SetCallCode(&addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetCode(addr))
+
+	ret, err = run(evm, contract, input)
 	if err != nil {
 		evm.StateDB.RevertToSnapshot(snapshot)
 		if err != errExecutionReverted {

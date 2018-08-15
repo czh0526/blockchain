@@ -55,6 +55,10 @@ func NewContract(caller ContractRef, object ContractRef, value *big.Int, gas uin
 	return c
 }
 
+func (c *Contract) Caller() common.Address {
+	return c.CallerAddress
+}
+
 func (c *Contract) Address() common.Address {
 	return c.self.Address()
 }

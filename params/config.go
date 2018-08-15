@@ -49,7 +49,13 @@ func (c *ChainConfig) String() string {
 }
 
 func (c *ChainConfig) GasTable(num *big.Int) GasTable {
-	return GasTableEIP158
+	if num == nil {
+		return GasTableHomestead
+	}
+	switch {
+	default:
+		return GasTableHomestead
+	}
 }
 
 type EthashConfig struct{}

@@ -42,7 +42,15 @@ func (h UnprefixedHash) MarshalText() ([]byte, error) {
 	return []byte(hex.EncodeToString(h[:])), nil
 }
 
-func HexToHash(s string) Hash { return BytesToHash(FromHex(s)) }
+func BigToHash(b *big.Int) Hash {
+	// big => bytes => hash
+	return BytesToHash(b.Bytes())
+}
+
+func HexToHash(s string) Hash {
+	// hex => bytes => hash
+	return BytesToHash(FromHex(s))
+}
 
 type Address [AddressLength]byte
 
@@ -73,6 +81,14 @@ func (a Address) Hex() string {
 		}
 	}
 	return "0x" + string(result)
+}
+
+func (a Address) Big() *big.Int {
+	return new(big.Int).SetBytes(a[:])
+}
+
+func BigToAddress(b *big.Int) Address {
+	return BytesToAddress(b.Bytes())
 }
 
 type UnprefixedAddress Address
