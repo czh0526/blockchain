@@ -6,6 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/czh0526/blockchain/crypto/sha3"
+	"github.com/czh0526/blockchain/rlp"
+
 	"github.com/czh0526/blockchain/common"
 )
 
@@ -91,4 +94,37 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	}
 
 	return b
+}
+
+func CopyHeader(h *Header) *Header {
+	// 复制数据
+	cpy := *h
+
+	// 重新构建指针成员
+	if cpy.Time = new(big.Int); h.Time != nil {
+		cpy.Time.Set(h.Time)
+	}
+	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
+		cpy.Difficulty.Set(h.Difficulty)
+	}
+	if cpy.Number = new(big.Int); h.Number != nil {
+		cpy.Number.Set(h.Number)
+	}
+	// 重新构建 slice 成员
+	if len(h.Extra) > 0 {
+		cpy.Extra = make([]byte, len(h.Extra))
+		copy(cpy.Extra, h.Extra)
+	}
+	return &cpy
+}
+
+func CalcUncleHash(uncles []*Header) common.Hash {
+	return rlpHash(uncles)
+}
+
+func rlpHash(x interface{}) (h common.Hash) {
+	hw := sha3.NewKeccak256()
+	rlp.Encode(hw, x)
+	hw.Sum(h[:0])
+	return h
 }
