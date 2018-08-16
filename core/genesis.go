@@ -10,6 +10,9 @@ import (
 	"github.com/czh0526/blockchain/common"
 	"github.com/czh0526/blockchain/common/hexutil"
 	"github.com/czh0526/blockchain/common/math"
+	"github.com/czh0526/blockchain/core/state"
+	"github.com/czh0526/blockchain/core/types"
+	"github.com/czh0526/blockchain/ethdb"
 	"github.com/czh0526/blockchain/params"
 )
 
@@ -86,4 +89,49 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 		(*ga)[common.Address(addr)] = a
 	}
 	return nil
+}
+
+func (g *Genesis) ToBlock(db ethdb.Database) *types.Block {
+	if db == nil {
+		db = ethdb.NewMemDatabase()
+	}
+
+	// 构建全局数据库 statedb
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(db))
+	for addr, account := range g.Alloc {
+		statedb.AddBalance(addr, account.Balance)
+		statedb.SetCode(addr, account.Code)
+		statedb.SetNonce(addr, account.Nonce)
+		for key, value := range account.Storage {
+			statedb.SetState(addr, key, value)
+		}
+	}
+	// 计算指纹
+	root := statedb.IntermediateRoot(false)
+	// 构建 header
+	head := &types.Header{
+		Number:     new(big.Int).SetUint64(g.Number),
+		Nonce:      types.EncodeNonce(g.Nonce),
+		Time:       new(big.Int).SetUint64(g.Timestamp),
+		ParentHash: g.ParentHash,
+		Extra:      g.ExtraData,
+		GasLimit:   g.GasLimit,
+		GasUsed:    g.GasUsed,
+		Difficulty: g.Difficulty,
+		MixDigest:  g.Mixhash,
+		Coinbase:   g.Coinbase,
+		Root:       root,
+	}
+	if g.GasLimit == 0 {
+		head.GasLimit = params.GenesisGasLimit
+	}
+	if g.Difficulty == nil {
+		head.Difficulty = params.GenesisDifficulty
+	}
+	// 全局状态的提交（不删除空对象）
+	statedb.Commit(false)
+	// 默克尔树的提交
+	statedb.Database().TrieDB().Commit(root, true)
+
+	return types.NewBlock(head, nil, nil, nil)
 }

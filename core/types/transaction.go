@@ -4,8 +4,10 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/czh0526/blockchain/rlp"
+
 	"github.com/czh0526/blockchain/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/czh0526/blockchain/common/hexutil"
 )
 
 type Transaction struct {
@@ -44,3 +46,10 @@ type txdataMarshaling struct {
 
 type Transactions []*Transaction
 
+func (s Transactions) Len() int {
+	return len(s)
+}
+
+func (s Transactions) GetRlp(i int) []byte {
+	return rlp.EncodeToBytes(s[i])
+}

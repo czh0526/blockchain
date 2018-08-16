@@ -6,3 +6,7 @@ const (
 )
 
 type Bloom [BloomByteLength]byte
+
+func CreateBloom(receipts Receipts) Bloom {
+
+}

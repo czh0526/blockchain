@@ -1,11 +1,12 @@
 package params
 
+import "math/big"
+
 const (
-	QuadCoeffDiv    uint64 = 512
-	CallCreateDepth uint64 = 1024
-	MemoryGas       uint64 = 3
+	GenesisGasLimit uint64 = 4712388
 
 	CallValueTransferGas uint64 = 9000
+	QuadCoeffDiv         uint64 = 512
 
 	Sha3Gas          uint64 = 30
 	Sha3WordGas      uint64 = 6
@@ -18,6 +19,8 @@ const (
 	StackLimit       uint64 = 1024
 	CreateGas        uint64 = 32000
 	SuicideRefundGas uint64 = 24000
+	CallCreateDepth  uint64 = 1024
+	MemoryGas        uint64 = 3
 
 	// Precompiled contract gas prices
 
@@ -33,5 +36,8 @@ const (
 	Bn256ScalarMulGas       uint64 = 40000  // Gas needed for an elliptic curve scalar multiplication
 	Bn256PairingBaseGas     uint64 = 100000 // Base price for an elliptic curve pairing check
 	Bn256PairingPerPointGas uint64 = 80000  // Per-point price for an elliptic curve pairing check
+)
 
+var (
+	GenesisDifficulty = big.NewInt(131072)
 )
