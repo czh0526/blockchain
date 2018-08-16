@@ -36,8 +36,11 @@ type txdataMarshaling struct {
 	Price        *hexutil.Big
 	GasLimit     hexutil.Uint64
 	Amount       *hexutil.Big
-	Payload      hexutl.Bytes
+	Payload      hexutil.Bytes
 	V            *hexutil.Big
 	R            *hexutil.Big
 	S            *hexutil.Big
 }
+
+type Transactions []*Transaction
+
