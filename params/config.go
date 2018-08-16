@@ -15,6 +15,10 @@ var (
 		false,             // DAOForkSupport
 		big.NewInt(0),     // EIP150Block
 		common.Hash{},     // EIP150Hash
+		big.NewInt(0),     // EIP155Block
+		big.NewInt(0),     // EIP158Block
+		big.NewInt(0),     // ByzantiumBlock
+		nil,               // ConstantinopleBlock
 		new(EthashConfig), // EthashConfig
 		nil,               // Clique
 	}
@@ -22,15 +26,21 @@ var (
 
 type ChainConfig struct {
 	ChainId        *big.Int `json:"chainId"`
-	HomesteadBlock *big.Int `json:"homesteadBlock, omitempty"`
-	DAOForkBlock   *big.Int `json:"daoForkBlock, omitempty"`
-	DAOForkSupport bool     `json:"daoForkSupport, omitempty"`
+	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"`
+	DAOForkBlock   *big.Int `json:"daoForkBlock,omitempty"`
+	DAOForkSupport bool     `json:"daoForkSupport,omitempty"`
 
-	EIP150Block *big.Int    `json:"eip150Block, omitempty"`
-	EIP150Hash  common.Hash `json:"eip150Hash, omitempty"`
+	EIP150Block *big.Int    `json:"eip150Block,omitempty"`
+	EIP150Hash  common.Hash `json:"eip150Hash,omitempty"`
 
-	Ethash *EthashConfig `json:"ethash, omitempty"`
-	Clique *CliqueConfig `json:"clique, omitempty"`
+	EIP155Block *big.Int `json:"eip155Block,omitempty"`
+	EIP158Block *big.Int `json:"eip158Block,omitempty"`
+
+	ByzantiumBlock      *big.Int `json:"byzantiumBlock,omitempty"`
+	ConstantinopleBlock *big.Int `json:"constantinopBlock,omitempty"`
+
+	Ethash *EthashConfig `json:"ethash,omitempty"`
+	Clique *CliqueConfig `json:"clique,omitempty"`
 }
 
 func (c *ChainConfig) String() string {

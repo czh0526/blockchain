@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"math/big"
 
+	"github.com/czh0526/blockchain/params"
+
 	"github.com/czh0526/blockchain/common"
 	"github.com/czh0526/blockchain/common/hexutil"
 	"github.com/czh0526/blockchain/common/math"
 	"github.com/czh0526/blockchain/core"
 	"github.com/czh0526/blockchain/core/state"
+	"github.com/czh0526/blockchain/core/vm"
 	"github.com/czh0526/blockchain/ethdb"
 )
 
@@ -21,7 +24,7 @@ func (t *StateTest) UnmarshalJSON(in []byte) error {
 }
 
 type stJSON struct {
-	ENV  stEnv                    `json:"env"`
+	Env  stEnv                    `json:"env"`
 	Pre  core.GenesisAlloc        `josn:"pre"`
 	Tx   stTransaction            `json:"transaction"`
 	Out  hexutil.Bytes            `json:"out"`
@@ -86,5 +89,43 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) *state.StateDB 
 	root, _ := statedb.Commit(false)
 	statedb, _ = state.New(root, sdb)
 	return statedb
+}
+
+type StateSubtest struct {
+	Fork  string
+	Index int
+}
+
+func (t *StateTest) Subtests() []StateSubtest {
+	var sub []StateSubtest
+	for fork, pss := range t.json.Post {
+		for i := range pss {
+			sub = append(sub, StateSubtest{fork, i})
+		}
+	}
+	return sub
+}
+
+func (t *StateTest) genesis(config *params.ChainConfig) *core.Genesis {
+	return &core.Genesis{
+		Config:     config,
+		Coinbase:   t.json.Env.Coinbase,
+		Difficulty: t.json.Env.Difficulty,
+		GasLimit:   t.json.Env.GasLimit,
+		Number:     t.json.Env.Number,
+		Timestamp:  t.json.Env.Timestamp,
+		Alloc:      t.json.Pre,
+	}
+}
+
+func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateDB, error) {
+	config, ok := Forks[subtest.Fork]
+	if !ok {
+		return nil, UnsupportedForkError{subtest.Fork}
+	}
+	block := t.genesis(config).ToBlock(nil)
+	statedb := MakePreState(ethdb.NewMemDatabase(), t.json.Pre)
+
+	post := t.json.Post[subtest.Fork][subtest.Index]
 
 }

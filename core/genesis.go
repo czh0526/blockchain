@@ -10,7 +10,24 @@ import (
 	"github.com/czh0526/blockchain/common"
 	"github.com/czh0526/blockchain/common/hexutil"
 	"github.com/czh0526/blockchain/common/math"
+	"github.com/czh0526/blockchain/params"
 )
+
+type Genesis struct {
+	Config     *params.ChainConfig `json:"config"`
+	Nonce      uint64              `json:"nonce"`
+	Timestamp  uint64              `json:"timestamp"`
+	ExtraData  []byte              `json:"extraData"`
+	GasLimit   uint64              `json:"gasLimit" gencodec:"required"`
+	Difficulty *big.Int            `json:"difficluty" gencodec:"required"`
+	Mixhash    common.Hash         `json:"mixHash"`
+	Coinbase   common.Address      `json:"coinbase"`
+	Alloc      GenesisAlloc        `json:"alloc" gencodec:"required"`
+
+	Number     uint64      `json:"number"`
+	GasUsed    uint64      `json:"gasUsed"`
+	ParentHash common.Hash `json:"parentHash"`
+}
 
 type GenesisAccount struct {
 	Code       []byte                      `json:"code,omitempty"`
